@@ -1,0 +1,73 @@
+{
+    "project": {
+        "path": "/Users/mayur.parmar/Documents/code/commerce/Vijay-Sales",
+        "name": "Vijay-Sales"
+    },
+    "output": {
+        "directory": "output"
+    },
+    "scanner": {
+        "namespace": "Custom",
+        "categories": [
+            "Exception Handling",
+            "Security",
+            "Database",
+            "Caching",
+            "Code Structure",
+            "Performance",
+            "Deprecated",
+            "Logging",
+            "File Storage",
+            "Reusability",
+            "Test Coverage",
+            "Dependency Injection",
+            "Plugin Architecture",
+            "Cron Jobs",
+            "GraphQL",
+            "Queue Processing",
+            "Configuration",
+            "Frontend Templates",
+            "XML Configuration",
+            "WebAPI & ACL",
+            "DB Schema",
+            "Infrastructure",
+            "Cloud Deployment",
+            "PHP Deep Analysis",
+            "Event Observers",
+            "Module Architecture",
+            "Code Metrics",
+            "Business Logic Identification",
+            "Coding Standards",
+            "Input Validation & XSS",
+            "Frontend Assets",
+            "Composer & Dependencies",
+            "Full Page Cache & Private Content",
+            "Backward Compatibility",
+            "Configuration & Scope",
+            "Layout & UI Components",
+            "XML Schema Validation",
+            "DB: Table Structure",
+            "DB: Index Analysis",
+            "DB: Column Analysis",
+            "DB: Foreign Keys",
+            "DB: Naming Conventions",
+            "DB: Storage Engine",
+            "DB: Charset & Collation",
+            "DB: Adobe Commerce Schema",
+            "DB: Data Integrity",
+            "DB: Performance"
+        ]
+    },
+    "database": {
+        "dump_path": "/Users/mayur.parmar/Downloads/prod-db-bkp.sql"
+    },
+    "thresholds": {
+        "god_class_lines": 500,
+        "fat_constructor_deps": 10,
+        "large_file_lines": 300,
+        "very_large_file_lines": 600,
+        "verbose_log_limit": 10,
+        "max_php_blocks_in_template": 10,
+        "max_methods_per_class": 20
+    }
+}
