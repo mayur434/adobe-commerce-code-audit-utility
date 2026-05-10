@@ -7,7 +7,7 @@ applyTo: "**"
 
 ## Project Overview
 
-This is a **standalone, reusable** Python tool that performs enterprise-grade static code analysis on any Adobe Commerce / Magento 2 project. It scans 27 audit categories and generates a comprehensive Excel report.
+This is a **standalone, reusable** Python tool that performs enterprise-grade static code analysis on any Adobe Commerce / Magento 2 project. It scans 52 audit categories (42 code + 10 DB dump) and generates a comprehensive Excel report.
 
 ## Tech Stack
 
@@ -19,12 +19,14 @@ This is a **standalone, reusable** Python tool that performs enterprise-grade st
 
 ```
 adobe-commerce-audit/
-├── audit.py              # CLI entry point (argparse)
+├── audit.py              # CLI entry point (argparse, --module filter, DB graceful handling)
 ├── lib/
-│   ├── __init__.py       # Package version: 3.0.0
-│   ├── scanner.py        # AdobeCommerceAuditScanner class (27 scan methods)
-│   ├── report.py         # AuditReportGenerator class (Excel + charts)
+│   ├── __init__.py       # Package version: 3.3.0
+│   ├── scanner.py        # AdobeCommerceAuditScanner class (42 code + 10 DB scan methods)
+│   ├── expert.py         # Expert validation engine (templates + category routing rules)
+│   ├── report.py         # AuditReportGenerator class (Excel — pure data sheets, no merged cells)
 │   └── styles.py         # Excel styling constants + helper functions
+├── config.json           # Project config (categories, thresholds, modules filter, DB path)
 ├── output/               # Generated reports (gitignored)
 ├── SKILL.md              # Copilot skill definition
 ├── AGENTS.md             # This file — agent context
@@ -36,16 +38,23 @@ adobe-commerce-audit/
 ## Key Classes
 
 ### `AdobeCommerceAuditScanner` (lib/scanner.py)
-- Constructor: `__init__(project_root, namespace="Custom")`
+- Constructor: `__init__(project_root, namespace="Custom", db_dump_path=None, categories=None, thresholds=None, modules=None)`
 - Entry point: `scan()` → returns `dict[str, list[dict]]` (category → findings)
-- 27 private `_scan_*` methods, each receives `(php, xml, phtml)` file lists
-- Helper methods: `_grep()`, `_read()`, `_add()`, `_context()`, `_module()`, `_rel()`
+- 42 private `_scan_*` code methods + 10 `_dbscan_*` DB dump methods, each auto-registered
+- DB table-to-module mapping via `_table_to_module()` (100+ prefix rules for Magento core tables)
+- Helper methods: `_grep()`, `_read()`, `_add()`, `_db_add()`, `_context()`, `_module()`, `_rel()`, `_filter_selected_modules()`
 - Accumulates findings in `self.findings` (defaultdict) and counts in `self.stats` (Counter)
 
 ### `AuditReportGenerator` (lib/report.py)
 - Constructor: `__init__(findings, stats, project_name, project_root)`
 - Entry point: `generate(output_path)` → saves `.xlsx` file
-- 5 sheet generators: `_sheet_executive_summary()`, `_sheet_detail()`, `_sheet_recommendations()`, `_sheet_action_plan()`, `_sheet_charts()`
+- 5 sheet generators: `_sheet_executive_summary()`, `_sheet_detail()`, `_sheet_recommendations()`, `_sheet_module_rollout_summary()`, `_sheet_module_plan()`
+- All data sheets are pure tabular (header row 1, data row 2+, no merged cells, auto-filter enabled)
+
+### `get_expert_recommendation()` (lib/expert.py)
+- Template-based expert validation engine with category routing rules
+- Returns expert recommendation string for each finding based on category, issue type, severity, and effort
+- Templates cover: service contracts, plugin ordering, cache profiling, ACL, observer patterns, MSI API, admin security, business flow integrity, critical callback security, and more
 
 ### `lib/styles.py` (constants + helpers)
 - Style constants: `HEADER_FONT`, `HEADER_FILL`, `THIN_BORDER`, `ZEBRA_FILL_*`, etc.
@@ -76,16 +85,22 @@ python3 audit.py --path /path/to/magento2-project --name "Project Name"
 ## Testing
 
 ```bash
-# Run against any Adobe Commerce project
-python3 audit.py --path /path/to/project
+# Run against any Adobe Commerce project using config.json
+python3 audit.py
 
-# Output goes to output/ directory with timestamp
+# Run with CLI overrides
+python3 audit.py --path /path/to/project --name "Project Name"
+
+# Targeted re-run for specific modules
+python3 audit.py --module Vendor_Checkout,Vendor_Payment
 ```
 
 ## Important Notes
 
 - This tool does **static analysis only** — it reads files, never executes project code
 - The scanner caches file reads in `self._php_cache` for performance
-- Charts use openpyxl's `PieChart`, `BarChart`, `DataPoint`, `DataLabelList`
+- DB dump analysis uses a streaming parser for multi-GB SQL files
+- DB findings are mapped to owning Magento modules via table name prefix matching (100+ rules)
 - The Recommendations sheet contains ~60 hardcoded best-practice items (not generated from findings)
-- The Action Plan sheet is dynamically generated from findings (P0=CRITICAL, P1=HIGH, P2=MEDIUM)
+- The Module Execution Plan lists every finding grouped by module, sorted by risk score
+- The Module Rollout Summary provides wave-based deployment planning per module/domain

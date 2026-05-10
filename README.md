@@ -1,18 +1,20 @@
-# Adobe Commerce Code Audit Tool v3.2
+# Adobe Commerce Code Audit Tool v3.3
 
 Enterprise-grade static code analysis for **Adobe Commerce / Magento 2** projects.
 
-The utility scans PHP, XML, PHTML, frontend assets, Cloud/infrastructure config, and optional SQL dumps, then generates a detailed Excel report with severity, remediation, expert validation, action planning, charts, and module-level rollout planning.
+The utility scans PHP, XML, PHTML, frontend assets, Cloud/infrastructure config, and optional SQL dumps, then generates a detailed Excel report with severity, remediation, expert validation, and module-level rollout & execution planning.
 
 ---
 
 ## Key capabilities
 
-- **40+ code and DB audit areas**, including security, coding standards, exception handling, DI, plugins, observers, cron, queues, GraphQL, WebAPI/ACL, DB schema, database dump analysis, Cloud deployment, caching, frontend templates, UI/layout XML, Composer/dependencies, backward compatibility, and infrastructure.
+- **52 audit categories** (42 code + 10 DB dump) covering security, coding standards, exception handling, DI, plugins, observers, cron, queues, GraphQL, WebAPI/ACL, DB schema, database dump analysis (table structure, indexes, columns, foreign keys, naming, engine, charset, schema, integrity, performance), Cloud deployment, caching, frontend templates, UI/layout XML, Composer/dependencies, backward compatibility, business customizations, critical commerce flows, MSI/inventory, admin/integration security, logical flow & cross-module analysis, and infrastructure.
 - **Business customization review** for high-blast-radius flows such as checkout, quote, order, payment, refund, shipping, inventory, customer, promotions, and external integrations.
 - **Critical commerce flow checks** for risky around plugins, `collectTotals()` use, webhook/idempotency gaps, direct entity state mutation, synchronous external calls, and notifications coupled to transactions.
 - **MSI / inventory review** for legacy stock writes, direct inventory table access, salable quantity assumptions, reservations, multi-source behavior, backorders, cancellations, refunds, and shipment source deduction.
 - **Admin and integration security review** for admin ACL, WebAPI resources, anonymous/customer API exposure, webhook signature validation, replay protection, and negative test expectations.
+- **DB table-to-module mapping** — database dump findings are automatically grouped under their owning Magento module (e.g., `sales_order` → `Magento_Sales`) in execution plan sheets. Custom/third-party tables remain under a "Database" fallback.
+- **Pure data sheets** — all detail and planning sheets are flat tabular data (header in row 1, no merged cells, no section separators) for full Excel filter, sort, grouping, pivot table, and formula support.
 - **Full-project scanning by default** across all custom modules, with module-wise remediation and production rollout planning in the generated report.
 - Optional `--module` / `scanner.modules` filter is retained only for targeted re-runs, debugging, or validating a specific remediation batch after the full audit is complete.
 - **Expert validation column** in every detail sheet to validate whether the base recommendation is aligned, needs stronger controls, may be a false positive, or needs rollout caution.
@@ -79,13 +81,11 @@ Recommended rollout order:
 The generated Excel workbook contains:
 
 - Executive Summary
-- Per-category finding sheets
+- Per-category finding sheets (pure data — filterable, sortable, groupable)
 - Expert Validation & Recommendation column on every detail sheet
 - Recommendations
-- Action Plan
-- Module Rollout Summary
-- Module Execution Plan
-- Charts
+- Module Rollout Summary (wave-based deployment planning)
+- Module Execution Plan (all findings grouped by module, sorted by risk)
 
 ## Notes
 
