@@ -69,10 +69,8 @@ class AuditReportGenerator:
                 self._sheet_detail(cat, self.findings[cat])
 
         self._sheet_recommendations()
-        self._sheet_action_plan()
         self._sheet_module_rollout_summary()
         self._sheet_module_plan()
-        self._sheet_charts()
 
         self.wb.save(output_path)
         print(f"✅ Report: {output_path}")
@@ -397,34 +395,21 @@ class AuditReportGenerator:
         tab_color = "FF0000" if "CRITICAL" in sevs else "FF6600" if "HIGH" in sevs else "FFCC00" if "MEDIUM" in sevs else "92D050"
         ws.sheet_properties.tabColor = tab_color
 
-        # --- Summary banner row ---
-        crit_cnt = sum(1 for x in sevs if x == "CRITICAL")
-        high_cnt = sum(1 for x in sevs if x == "HIGH")
-        banner = f"{category}  —  {len(items)} findings  |  {crit_cnt} Critical  |  {high_cnt} High"
-        ws.merge_cells('A1:K1')
-        b_cell = ws.cell(row=1, column=1, value=banner)
-        b_cell.font = Font(name='Calibri', bold=True, size=12, color='FFFFFF')
-        b_cell.fill = PatternFill(start_color=tab_color, end_color=tab_color, fill_type='solid')
-        b_cell.alignment = Alignment(horizontal='left', vertical='center')
-        ws.row_dimensions[1].height = 30
-        for c in range(1, 12):
-            ws.cell(row=1, column=c).fill = PatternFill(start_color=tab_color, end_color=tab_color, fill_type='solid')
-
-        # --- Header row ---
+        # --- Header row (row 1 — no banner, pure data sheet) ---
         headers = ["#", "Module", "File Path", "Line #", "Issue Type", "Description", "Code Context", "Severity", "Recommendation", "Expert Validation & Recommendation", "Effort"]
         for c, h in enumerate(headers, 1):
-            cell = ws.cell(row=2, column=c, value=h)
+            cell = ws.cell(row=1, column=c, value=h)
             cell.font = HEADER_FONT
             cell.fill = HEADER_FILL
             cell.alignment = CENTER_ALIGN
             cell.border = HEADER_BORDER
-        ws.row_dimensions[2].height = 28
-        ws.freeze_panes = 'A3'
-        ws.auto_filter.ref = f"A2:K2"
+        ws.row_dimensions[1].height = 28
+        ws.freeze_panes = 'A2'
+        ws.auto_filter.ref = f"A1:K1"
 
         # --- Data rows ---
         for idx, item in enumerate(items, 1):
-            r = idx + 2
+            r = idx + 1
             ws.row_dimensions[r].height = 32
             ws.cell(row=r, column=1, value=idx)
             ws.cell(row=r, column=2, value=item["module"])
@@ -439,12 +424,12 @@ class AuditReportGenerator:
             ws.cell(row=r, column=10, value=get_expert_recommendation(category, item["type"], item["severity"], item.get("effort", "Medium")))
             ws.cell(row=r, column=11, value=item["effort"])
 
-        mr = len(items) + 2
+        mr = len(items) + 1
         color_severity_col(ws, 8, mr)
-        apply_zebra_and_borders(ws, mr, len(headers), data_start=3)
+        apply_zebra_and_borders(ws, mr, len(headers), data_start=2)
 
         # Style effort column as centered
-        for r in range(3, mr + 1):
+        for r in range(2, mr + 1):
             ws.cell(row=r, column=11).alignment = CENTER_TOP
 
         widths = [6, 28, 55, 8, 28, 60, 55, 12, 65, 75, 10]
@@ -650,26 +635,17 @@ class AuditReportGenerator:
         ws = self.wb.create_sheet("Action Plan")
         ws.sheet_properties.tabColor = "FFC000"
 
-        # Banner
-        ws.merge_cells('A1:G1')
-        b = ws.cell(row=1, column=1, value="PRIORITIZED ACTION PLAN")
-        b.font = Font(name='Calibri', bold=True, size=13, color='FFFFFF')
-        b.fill = PatternFill(start_color='FFC000', end_color='FFC000', fill_type='solid')
-        b.alignment = Alignment(horizontal='left', vertical='center')
-        ws.row_dimensions[1].height = 30
-        for c in range(1, 8):
-            ws.cell(row=1, column=c).fill = PatternFill(start_color='FFC000', end_color='FFC000', fill_type='solid')
-
+        # Header row (row 1 — no banner, pure data sheet)
         headers = ["Priority", "Action Item", "Category", "Modules", "Effort", "Risk if Not Fixed", "Sprint"]
         for c, h in enumerate(headers, 1):
-            cell = ws.cell(row=2, column=c, value=h)
+            cell = ws.cell(row=1, column=c, value=h)
             cell.font = HEADER_FONT
             cell.fill = HEADER_FILL
             cell.alignment = CENTER_ALIGN
             cell.border = HEADER_BORDER
-        ws.row_dimensions[2].height = 28
-        ws.freeze_panes = 'A3'
-        ws.auto_filter.ref = "A2:G2"
+        ws.row_dimensions[1].height = 28
+        ws.freeze_panes = 'A2'
+        ws.auto_filter.ref = "A1:G1"
 
         actions = []
 
@@ -723,16 +699,16 @@ class AuditReportGenerator:
         ]
 
         for idx, item in enumerate(actions, 1):
-            r = idx + 2
+            r = idx + 1
             for ci, val in enumerate(item, 1):
                 ws.cell(row=r, column=ci, value=val)
 
-        mr = len(actions) + 2
+        mr = len(actions) + 1
         color_priority_col(ws, 1, mr)
-        apply_zebra_and_borders(ws, mr, len(headers), data_start=3)
+        apply_zebra_and_borders(ws, mr, len(headers), data_start=2)
 
         # Style Sprint column centered
-        for r in range(3, mr + 1):
+        for r in range(2, mr + 1):
             ws.cell(row=r, column=7).alignment = CENTER_TOP
             ws.cell(row=r, column=5).alignment = CENTER_TOP
 
@@ -878,43 +854,21 @@ class AuditReportGenerator:
         ws = self.wb.create_sheet("Module Execution Plan")
         ws.sheet_properties.tabColor = "7030A0"
 
-        # ── Banner ────────────────────────────────────────────────────────
-        ws.merge_cells('A1:K1')
-        b = ws.cell(row=1, column=1,
-                    value="MODULE-WISE EXECUTION PLAN — Fix & Deploy Module by Module")
-        b.font = Font(name='Calibri', bold=True, size=13, color='FFFFFF')
-        b.fill = PatternFill(start_color='7030A0', end_color='7030A0', fill_type='solid')
-        b.alignment = Alignment(horizontal='left', vertical='center')
-        ws.row_dimensions[1].height = 32
-        for c in range(1, 12):
-            ws.cell(row=1, column=c).fill = PatternFill(
-                start_color='7030A0', end_color='7030A0', fill_type='solid')
-
-        # ── Subtitle ─────────────────────────────────────────────────────
-        ws.merge_cells('A2:K2')
-        sub = ws.cell(row=2, column=1,
-                      value="Modules ordered by risk (critical-count → high-count → total). "
-                            "Deploy fixes per module to reduce blast radius. "
-                            "Every severity level is included — nothing is skipped.")
-        sub.font = Font(name='Calibri', italic=True, size=10, color='666666')
-        sub.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
-        ws.row_dimensions[2].height = 28
-
-        # ── Header row ───────────────────────────────────────────────────
+        # ── Header row (row 1 — no banner, pure data sheet) ──────────────
         headers = [
             "#", "Module", "Priority", "Category", "Severity",
             "Issue Type", "File", "Line", "Description",
             "Recommendation", "Effort",
         ]
         for c, h in enumerate(headers, 1):
-            cell = ws.cell(row=3, column=c, value=h)
+            cell = ws.cell(row=1, column=c, value=h)
             cell.font = HEADER_FONT
             cell.fill = HEADER_FILL
             cell.alignment = CENTER_ALIGN
             cell.border = HEADER_BORDER
-        ws.row_dimensions[3].height = 28
-        ws.freeze_panes = 'A4'
-        ws.auto_filter.ref = f"A3:K3"
+        ws.row_dimensions[1].height = 28
+        ws.freeze_panes = 'A2'
+        ws.auto_filter.ref = f"A1:K1"
 
         # ── Collect & sort by module risk ─────────────────────────────────
         SEV_WEIGHT = {"CRITICAL": 10000, "HIGH": 1000, "MEDIUM": 100, "LOW": 10, "INFO": 1}
@@ -935,20 +889,17 @@ class AuditReportGenerator:
         # Within each module, sort items: CRITICAL first, then HIGH, etc.
         SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
-        row = 4
+        row = 2
         seq = 0
         for mod_idx, mod in enumerate(sorted_modules):
             items = sorted(mod_items[mod],
                            key=lambda x: (SEV_ORDER.get(x["severity"], 5), x["_category"]))
 
-            # Module-level counts
+            # Determine module priority
             crit = sum(1 for i in items if i["severity"] == "CRITICAL")
             high = sum(1 for i in items if i["severity"] == "HIGH")
             med = sum(1 for i in items if i["severity"] == "MEDIUM")
-            low = sum(1 for i in items if i["severity"] == "LOW")
-            info = sum(1 for i in items if i["severity"] == "INFO")
 
-            # Determine module priority
             if crit > 0:
                 mod_priority = "P0 — Immediate"
             elif high > 0:
@@ -958,25 +909,7 @@ class AuditReportGenerator:
             else:
                 mod_priority = "P3 — Backlog"
 
-            # ── Module section header row ─────────────────────────────────
-            ws.merge_cells(f'A{row}:K{row}')
-            header_text = (
-                f"▸ {mod}  |  {mod_priority}  |  "
-                f"{len(items)} findings  |  "
-                f"C:{crit}  H:{high}  M:{med}  L:{low}  I:{info}"
-            )
-            sec_cell = ws.cell(row=row, column=1, value=header_text)
-            sec_color = 'FF0000' if crit > 0 else 'FF6600' if high > 0 else 'FFCC00' if med > 0 else '92D050'
-            sec_cell.font = Font(name='Calibri', bold=True, size=11, color='FFFFFF')
-            sec_cell.fill = PatternFill(start_color=sec_color, end_color=sec_color, fill_type='solid')
-            sec_cell.alignment = Alignment(horizontal='left', vertical='center')
-            for c in range(1, 12):
-                ws.cell(row=row, column=c).fill = PatternFill(
-                    start_color=sec_color, end_color=sec_color, fill_type='solid')
-            ws.row_dimensions[row].height = 26
-            row += 1
-
-            # ── Item rows ─────────────────────────────────────────────────
+            # ── Item rows (no section header — pure data) ─────────────────
             for item in items:
                 seq += 1
                 ws.row_dimensions[row].height = 30
@@ -998,9 +931,9 @@ class AuditReportGenerator:
         # ── Apply styling ─────────────────────────────────────────────────
         color_severity_col(ws, 5, mr)
         color_priority_col(ws, 3, mr)
-        apply_zebra_and_borders(ws, mr, len(headers), data_start=4)
+        apply_zebra_and_borders(ws, mr, len(headers), data_start=2)
 
-        for r in range(4, mr + 1):
+        for r in range(2, mr + 1):
             ws.cell(row=r, column=1).alignment = CENTER_TOP
             ws.cell(row=r, column=8).alignment = CENTER_TOP
             ws.cell(row=r, column=11).alignment = CENTER_TOP
