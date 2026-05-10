@@ -1,7 +1,7 @@
 """
 Adobe Commerce Code Audit Scanner Engine
 =========================================
-Dynamically scans an Adobe Commerce (Magento 2) codebase for 27 audit categories.
+Dynamically scans an Adobe Commerce (Magento 2) codebase for 40+ audit categories.
 Each scan method finds issues and adds findings with severity, line numbers,
 code context, and recommendations.
 """
@@ -13,7 +13,7 @@ from collections import defaultdict, Counter
 
 
 class AdobeCommerceAuditScanner:
-    """Dynamically scans an Adobe Commerce codebase for 28 audit categories + DB analysis."""
+    """Dynamically scans an Adobe Commerce codebase for 40+ audit categories + DB analysis."""
 
     # Default thresholds — overridable via config.json
     DEFAULT_THRESHOLDS = {
@@ -26,7 +26,7 @@ class AdobeCommerceAuditScanner:
         "max_methods_per_class": 20,
     }
 
-    def __init__(self, project_root=None, namespace="Custom", thresholds=None, categories=None, db_dump_path=None):
+    def __init__(self, project_root=None, namespace="Custom", thresholds=None, categories=None, db_dump_path=None, modules=None):
         self.root = os.path.abspath(project_root) if project_root else None
         self.namespace = namespace
         self.app_code = os.path.join(self.root, "app", "code") if self.root else None
@@ -36,6 +36,7 @@ class AdobeCommerceAuditScanner:
         self.thresholds = {**self.DEFAULT_THRESHOLDS, **(thresholds or {})}
         self._enabled_categories = set(categories) if categories else None  # None = all
         self.db_dump_path = db_dump_path
+        self._selected_modules = set(modules or [])  # module names like Vendor_Module; None/empty = all
 
     # ---------- file helpers ----------
 
@@ -70,6 +71,12 @@ class AdobeCommerceAuditScanner:
         if len(parts) >= 4 and parts[0] == "app" and parts[1] == "code":
             return f"{parts[2]}_{parts[3]}"
         return "Unknown"
+
+    def _filter_selected_modules(self, files):
+        """Restrict scan input to selected modules when --module/scanner.modules is used."""
+        if not self._selected_modules:
+            return files
+        return [fp for fp in files if self._module(fp) in self._selected_modules]
 
     def _read(self, fp):
         if fp not in self._php_cache:
@@ -135,9 +142,11 @@ class AdobeCommerceAuditScanner:
 
         # --- Code scan (only if project path provided) ---
         if self.root and self.app_code:
-            php = self._php_files()
-            xml = self._xml_files()
-            phtml = self._phtml_files()
+            php = self._filter_selected_modules(self._php_files())
+            xml = self._filter_selected_modules(self._xml_files())
+            phtml = self._filter_selected_modules(self._phtml_files())
+            if self._selected_modules:
+                print(f"   Module filter: {', '.join(sorted(self._selected_modules))}")
             print(f"   Files: {len(php)} PHP, {len(xml)} XML, {len(phtml)} PHTML\n")
 
             code_scanners = [
@@ -169,6 +178,11 @@ class AdobeCommerceAuditScanner:
                 ("Module Architecture",   self._scan_module_arch),
                 ("Code Metrics",          self._scan_code_metrics),
                 ("Business Logic Identification", self._scan_business_logic),
+                ("Business Customization Review", self._scan_business_customizations),
+                ("Critical Commerce Flows", self._scan_critical_commerce_flows),
+                ("MSI Inventory & Source Management", self._scan_msi_inventory),
+                ("Admin & Integration Security", self._scan_admin_integration_security),
+                ("Logical Flow & Cross-Module", self._scan_logical_flow),
                 ("Coding Standards",      self._scan_coding_standards),
                 ("Input Validation & XSS", self._scan_input_validation),
                 ("Frontend Assets",       self._scan_frontend_assets),
@@ -2474,6 +2488,577 @@ class AdobeCommerceAuditScanner:
                 f"{info_count} follow Adobe standards, {action_count} need architectural review.",
                 "Capabilities: " + ", ".join(t for t, _ in biz_types.most_common(10)), "INFO",
                 "Review all HIGH/CRITICAL findings for architecture alignment with Adobe Commerce best practices.", "Low")
+
+    # ==================== LOGICAL FLOW & CROSS-MODULE ANALYSIS ====================
+
+    # ==================== BUSINESS CUSTOMIZATION DEEP REVIEW ====================
+
+    def _scan_business_customizations(self, php, xml, phtml):
+        """Deep review of business customizations that directly affect revenue, order state, and customer experience."""
+        CAT = "Business Customization Review"
+        critical_terms = re.compile(
+            r'(quote|cart|checkout|order|invoice|shipment|creditmemo|refund|payment|capture|authorize|'
+            r'cancel|hold|unhold|coupon|discount|reward|gift|storecredit|customer|address|tax|shipping|inventory|stock)',
+            re.IGNORECASE,
+        )
+
+        for f in php:
+            mod = self._module(f)
+            content = self._read(f)
+            if not content:
+                continue
+            lower_path = f.replace('\\', '/').lower()
+
+            # Direct state/status mutation in high-risk flows.
+            for hit in self._grep(f, r'->set(State|Status)\s*\('):
+                context = self._context(f, hit[0])
+                if critical_terms.search(context + " " + lower_path):
+                    self._add(CAT, mod, f, hit[0],
+                        "Direct Order/Entity State Mutation",
+                        "Business flow appears to set state/status directly. Direct mutations can bypass Adobe Commerce state machines, payment review, invoice/shipment lifecycle, and notification/indexer side effects.",
+                        context, "CRITICAL",
+                        "Validate whether this is changing order/payment/invoice/shipment/customer state. Prefer service-layer APIs such as order management, payment commands, invoice/shipment services, or explicit domain services. Add integration tests for happy path, failure path, retry/idempotency, email/event side effects, and status history.",
+                        "High")
+
+            # Direct order save bypassing repositories/services.
+            for hit in self._grep(f, r'->save\s*\(\s*\$?(order|quote|invoice|shipment|creditmemo|payment|customer)', re.IGNORECASE):
+                self._add(CAT, mod, f, hit[0],
+                    "Direct Save on Critical Business Entity",
+                    "Critical commerce entity appears to be persisted directly, which can bypass service contracts, extension attributes, indexers, events, and transaction boundaries.",
+                    self._context(f, hit[0]), "HIGH",
+                    "Use the appropriate repository/service/management interface and wrap multi-entity writes in a transaction. Verify observers/plugins still run as expected and add regression tests for order placement, cancellation, refunds, shipments, customer save, and quote-to-order conversion.",
+                    "Medium")
+
+            # Business conditionals tightly coupled to static IDs/SKUs/store/customer groups.
+            for hit in self._grep(f, r'(getSku\s*\(\)|customer_group_id|getCustomerGroupId\s*\(\)|getStoreId\s*\(\)|website_id|store_id).*?(==|!=|===|!==|in_array)'):
+                self._add(CAT, mod, f, hit[0],
+                    "Hardcoded Business Rule Condition",
+                    "Business behavior appears tied to hardcoded SKU/store/website/customer group conditions. These rules are fragile during catalog, store, and B2B changes.",
+                    self._context(f, hit[0]), "MEDIUM",
+                    "Move business rules into admin configuration, SalesRule/CatalogRule/customer segment configuration, or a documented domain service with scoped config. Add tests for each store/website/customer group and document the owning business process.",
+                    "Medium")
+
+            # External APIs in synchronous checkout/order/payment hot paths.
+            if critical_terms.search(lower_path) or re.search(r'class\s+.*(Checkout|Order|Payment|Shipping|Inventory|Customer)', content):
+                if re.search(r'(curl_exec|ClientInterface|GuzzleHttp|Zend\\Http|Laminas\\Http|file_get_contents\s*\(\s*[\'\"]https?://)', content):
+                    self._add(CAT, mod, f, 1,
+                        "Synchronous External API in Critical Flow",
+                        "Critical business flow appears to call an external service synchronously. Latency, timeout, or provider errors can directly block checkout/order/customer operations.",
+                        self._context(f, 1), "HIGH",
+                        "Set strict timeouts, circuit-breaker behavior, sanitized structured logging, and explicit fallback rules. For non-blocking work, move to message queues. For mandatory calls, make retry/idempotency keys explicit and add integration tests for timeout, 4xx, 5xx, duplicate callback, and partial failure.",
+                        "High")
+
+            # Event dispatch without clear data object in critical flows.
+            for hit in self._grep(f, r'eventManager->dispatch\s*\(\s*[\'\"]([^\'\"]+)[\'\"]'):
+                event_name = hit[2].group(1)
+                if critical_terms.search(event_name + " " + lower_path):
+                    self._add(CAT, mod, f, hit[0],
+                        f"Critical Business Event Contract: {event_name}",
+                        "A custom/critical event is dispatched in a business flow. Event payloads are implicit contracts that can silently break dependent modules.",
+                        self._context(f, hit[0]), "INFO",
+                        "Document event timing, payload keys, mutability expectations, and rollback behavior. Add module sequence dependencies where observers require dispatcher classes and integration tests that prove downstream observers still receive expected payloads.",
+                        "Low")
+
+    def _scan_critical_commerce_flows(self, php, xml, phtml):
+        """Find risky patterns around checkout, payment, order, refund, and customer flows."""
+        CAT = "Critical Commerce Flows"
+        for f in php:
+            mod = self._module(f)
+            content = self._read(f)
+            if not content:
+                continue
+            path = f.replace('\\', '/')
+            lower = path.lower()
+
+            # Around plugins on core checkout/order/payment save flows are high blast radius.
+            if 'Plugin' in path and re.search(r'function\s+around(?:Place|Save|Execute|Collect|Capture|Refund|Cancel|Submit|Import|Validate)', content):
+                self._add(CAT, mod, f, 1,
+                    "Around Plugin on Critical Commerce Flow",
+                    "Around plugin detected on a method name commonly used in checkout/order/payment/shipping/customer flows. Around plugins can skip original execution or change return semantics.",
+                    self._context(f, 1), "HIGH",
+                    "Prefer before/after plugins or service composition where possible. If around is unavoidable, always call proceed exactly once unless explicitly blocking, preserve return type, handle exceptions safely, and add integration tests around the complete checkout/order/payment flow.",
+                    "Medium")
+
+            # Quote/order totals and collectTotals recursion/performance risk.
+            for hit in self._grep(f, r'collectTotals\s*\('):
+                severity = "HIGH" if any(token in lower for token in ['/checkout/', '/quote/', '/order/', '/observer/', '/plugin/']) else "MEDIUM"
+                self._add(CAT, mod, f, hit[0],
+                    "collectTotals Usage in Business Flow",
+                    "collectTotals is expensive and can trigger totals collectors, promotions, shipping/tax recalculation, and plugin chains. Incorrect use can create checkout slowness or inconsistent quote totals.",
+                    self._context(f, hit[0]), severity,
+                    "Call collectTotals only at well-defined quote mutation boundaries, avoid loops/observers that can recurse, and profile with production-like cart sizes. Add tests for coupons, tax, shipping, multi-address, bundle/configurable products, and currency/store scope.",
+                    "Medium")
+
+            # Email/notification inside transactions or critical logic.
+            if re.search(r'(TransportBuilder|SenderBuilder|sendMessage\s*\(|send\s*\()', content) and re.search(r'(beginTransaction|order|invoice|shipment|creditmemo|payment)', content, re.IGNORECASE):
+                self._add(CAT, mod, f, 1,
+                    "Notification Coupled to Transactional Flow",
+                    "Email/notification logic appears coupled with order/payment/invoice/shipment processing. Failures can block business state changes or cause duplicate notifications on retry.",
+                    self._context(f, 1), "MEDIUM",
+                    "Move notification dispatch after successful persistence or to an async queue. Ensure idempotency, template scope, store identity, and suppression rules are explicit. Test retries to avoid duplicate emails/SMS/webhooks.",
+                    "Medium")
+
+            # Non-idempotent callbacks/webhooks.
+            if re.search(r'(webhook|callback|ipn|notification|response|gateway)', lower) and re.search(r'function\s+execute\s*\(', content):
+                if not re.search(r'(idempot|unique|transaction_id|txn_id|increment_id|already|duplicate)', content, re.IGNORECASE):
+                    self._add(CAT, mod, f, 1,
+                        "Webhook/Callback Without Visible Idempotency Guard",
+                        "Inbound payment/shipping/integration callback does not show an obvious idempotency or duplicate-event guard. Duplicate callbacks can double-capture, double-refund, or overwrite order state.",
+                        self._context(f, 1), "CRITICAL",
+                        "Persist external event IDs/transaction IDs with a unique constraint, reject or no-op duplicates, verify signatures, and lock affected order/payment rows during state transitions. Test duplicate, out-of-order, replayed, and delayed callback scenarios.",
+                        "High")
+
+    def _scan_msi_inventory(self, php, xml, phtml):
+        """Review Multi-Source Inventory and stock reservation customizations."""
+        CAT = "MSI Inventory & Source Management"
+        for f in php:
+            mod = self._module(f)
+            content = self._read(f)
+            if not content:
+                continue
+            path = f.replace('\\', '/')
+            inventory_related = re.search(r'(Inventory|Source|Stock|Salable|Reservation|Shipment|Backorder)', path + " " + content, re.IGNORECASE)
+            if not inventory_related:
+                continue
+
+            for hit in self._grep(f, r'(cataloginventory_stock_item|cataloginventory_stock_status|inventory_reservation|inventory_source_item)'):
+                self._add(CAT, mod, f, hit[0],
+                    "Direct Inventory Table Access",
+                    "Inventory/stock tables are accessed directly. In MSI, salable quantity, reservations, and source items are service-driven and direct writes/read assumptions can be wrong.",
+                    self._context(f, hit[0]), "HIGH",
+                    "Use MSI service contracts such as GetProductSalableQtyInterface, SourceItemsSaveInterface, reservations APIs, or stock resolver services. Validate single-source vs multi-source behavior, backorders, partial shipments, refunds, source selection, and reindex impact.",
+                    "Medium")
+
+            if re.search(r'(setQty|setIsInStock|setStockData|saveStock)', content) and 'SourceItemsSaveInterface' not in content:
+                self._add(CAT, mod, f, 1,
+                    "Legacy Stock Mutation Pattern",
+                    "Stock quantity/status appears to be mutated with legacy catalog inventory patterns instead of MSI source item/reservation services.",
+                    self._context(f, 1), "HIGH",
+                    "For Adobe Commerce 2.4.x, update source items or reservations through MSI APIs, not legacy stock item saves. Add tests for source-specific qty, salable qty, website stock mapping, cancellations/refunds, and async order placement.",
+                    "High")
+
+            if re.search(r'(isSaleable|getSalableQty|backorder|reservation)', content, re.IGNORECASE) and re.search(r'(quote|cart|checkout|order)', content, re.IGNORECASE):
+                self._add(CAT, mod, f, 1,
+                    "Inventory Check in Checkout/Order Flow",
+                    "Inventory availability logic appears inside checkout/order flow. Incorrect assumptions can oversell, block valid orders, or ignore reservations/backorders.",
+                    self._context(f, 1), "MEDIUM",
+                    "Validate with MSI stock resolver and salable qty APIs. Cover simple/configurable/bundle products, backorders, multiple websites/stocks, reservations after order placement, cancellation, refund, and shipment source deduction.",
+                    "Medium")
+
+    def _scan_admin_integration_security(self, php, xml, phtml):
+        """Review admin routes, integrations, webhooks, and tokens with a business-impact/security lens."""
+        CAT = "Admin & Integration Security"
+        for f in xml:
+            mod = self._module(f)
+            content = self._read(f)
+            if not content:
+                continue
+            if f.endswith('webapi.xml'):
+                for m in re.finditer(r'<route\s+[^>]*url="([^"]+)"[^>]*>.*?<resource\s+ref="([^"]+)"', content, re.DOTALL):
+                    route_url, resource = m.group(1), m.group(2)
+                    line = self._line_of(content, m.start())
+                    if resource in ('anonymous', 'Magento_Customer::customer') and re.search(r'(order|payment|invoice|shipment|refund|customer|cart|quote|inventory|stock)', route_url, re.IGNORECASE):
+                        self._add(CAT, mod, f, line,
+                            f"Broad WebAPI ACL on Critical Route: {route_url}",
+                            f"Critical WebAPI route uses broad resource '{resource}'. This may expose business operations or customer data beyond intended roles.",
+                            self._context(f, line), "CRITICAL" if resource == 'anonymous' else "HIGH",
+                            "Restrict to least-privilege ACL resources, require customer/admin auth as appropriate, validate ownership of entity IDs, and add negative API tests for anonymous, wrong customer, low-privilege admin, and expired/inactive tokens.",
+                            "Medium")
+
+        for f in php:
+            mod = self._module(f)
+            content = self._read(f)
+            if not content:
+                continue
+            path = f.replace('\\', '/')
+            # Admin controllers without explicit ADMIN_RESOURCE or _isAllowed.
+            if '/Controller/Adminhtml/' in path and 'ADMIN_RESOURCE' not in content and 'function _isAllowed' not in content:
+                self._add(CAT, mod, f, 1,
+                    "Admin Controller Missing Explicit ACL",
+                    "Adminhtml controller has no visible ADMIN_RESOURCE or _isAllowed guard. It may inherit overly broad access or become inaccessible/unpredictable.",
+                    self._context(f, 1), "HIGH",
+                    "Define a least-privilege ADMIN_RESOURCE constant and matching acl.xml resource. Add tests for allowed and denied admin roles, including POST/state-changing actions with valid/invalid form keys.",
+                    "Low")
+
+            # Signature verification for inbound integrations/webhooks.
+            if re.search(r'(webhook|callback|ipn|notification)', path, re.IGNORECASE) and re.search(r'function\s+execute\s*\(', content):
+                if not re.search(r'(hash_hmac|signature|hmac|openssl_verify|verify.*sign|X-Signature|Authorization)', content, re.IGNORECASE):
+                    self._add(CAT, mod, f, 1,
+                        "Inbound Integration Missing Signature Verification",
+                        "Webhook/callback controller does not show obvious signature/auth verification. Attackers could spoof payment/shipping/ERP callbacks.",
+                        self._context(f, 1), "CRITICAL",
+                        "Verify HMAC/signature/timestamp/nonce before processing, reject replayed requests, store audit logs with masked payloads, and add negative tests for invalid signature, expired timestamp, wrong IP/header, and duplicate event.",
+                        "High")
+
+    def _scan_logical_flow(self, php, xml, phtml):
+        """Analyse cross-module dependencies, duplicated business logic, reuse opportunities,
+        and end-to-end logical flows at the module level."""
+        CAT = "Logical Flow & Cross-Module"
+
+        # ── 1. Build module-level dependency graph ────────────────────────────
+        # module -> set of modules it depends on (via use/import statements)
+        module_deps = defaultdict(set)       # Vendor_Module -> {Vendor_Module2, ...}
+        module_classes = defaultdict(set)     # Vendor_Module -> {FQCN, ...}
+        module_files = defaultdict(list)      # Vendor_Module -> [filepath, ...]
+        class_to_module = {}                  # FQCN -> Vendor_Module
+        module_methods = defaultdict(lambda: defaultdict(set))  # module -> class_basename -> {methods}
+        module_method_bodies = defaultdict(lambda: defaultdict(dict))  # module -> class_bn -> {method: body_hash}
+
+        import hashlib
+
+        for f in php:
+            mod = self._module(f)
+            if mod == "Unknown":
+                continue
+            module_files[mod].append(f)
+            content = self._read(f)
+            if not content:
+                continue
+
+            # Extract namespace + class name for this file
+            ns_m = re.search(r'namespace\s+([\w\\]+)\s*;', content)
+            class_m = re.search(r'(?:class|interface|trait)\s+(\w+)', content)
+            if ns_m and class_m:
+                fqcn = f"{ns_m.group(1)}\\{class_m.group(1)}"
+                module_classes[mod].add(fqcn)
+                class_to_module[fqcn] = mod
+
+            # Extract use statements to build dependency graph
+            for use_m in re.finditer(r'use\s+([\w\\]+)\s*;', content):
+                used_ns = use_m.group(1)
+                parts = used_ns.replace('\\', '/').split('/')
+                if len(parts) >= 2:
+                    dep_mod = f"{parts[0]}_{parts[1]}"
+                    if dep_mod != mod and not parts[0] in ('Magento', 'Psr', 'Laminas', 'Monolog',
+                                                            'Symfony', 'Composer', 'PHPUnit', 'Exception'):
+                        module_deps[mod].add(dep_mod)
+
+            # Collect method names & body hashes for duplication detection
+            class_bn = os.path.basename(f).replace('.php', '')
+            for meth_m in re.finditer(
+                r'(?:public|protected|private)\s+function\s+(\w+)\s*\([^)]*\)\s*(?::\s*\S+\s*)?\{',
+                content
+            ):
+                method_name = meth_m.group(1)
+                if method_name.startswith('__'):
+                    continue
+                module_methods[mod][class_bn].add(method_name)
+                # Extract rough body (first 600 chars after the opening brace)
+                body_start = meth_m.end()
+                body_snippet = content[body_start:body_start + 600].strip()
+                # Normalise whitespace for comparison
+                norm = re.sub(r'\s+', ' ', body_snippet)
+                body_hash = hashlib.md5(norm.encode()).hexdigest()
+                module_method_bodies[mod][class_bn][method_name] = body_hash
+
+        # ── 2. Circular dependency detection ──────────────────────────────────
+        def _find_cycles(graph):
+            visited = set()
+            stack = set()
+            cycles = []
+
+            def dfs(node, path):
+                visited.add(node)
+                stack.add(node)
+                for neighbour in graph.get(node, set()):
+                    if neighbour in stack:
+                        cycle_start = path.index(neighbour) if neighbour in path else -1
+                        if cycle_start >= 0:
+                            cycles.append(path[cycle_start:] + [neighbour])
+                    elif neighbour not in visited:
+                        dfs(neighbour, path + [neighbour])
+                stack.discard(node)
+
+            for node in list(graph.keys()):
+                if node not in visited:
+                    dfs(node, [node])
+            return cycles
+
+        cycles = _find_cycles(module_deps)
+        reported_cycles = set()
+        for cycle in cycles:
+            key = tuple(sorted(cycle[:-1]))
+            if key in reported_cycles:
+                continue
+            reported_cycles.add(key)
+            cycle_str = " → ".join(cycle)
+            first_mod = cycle[0]
+            fp = module_files[first_mod][0] if module_files.get(first_mod) else self.app_code
+            self._add(CAT, first_mod, fp, 1,
+                f"Circular Dependency ({len(cycle)-1} modules)",
+                f"Circular dependency chain: {cycle_str}. "
+                "Circular dependencies make modules tightly coupled, prevent independent deployment, "
+                "and create fragile upgrade paths.",
+                f"Cycle: {cycle_str}", "HIGH",
+                "RECOMMENDATION: Break the cycle by introducing a shared interface module or event-driven "
+                "decoupling. Extract the shared contract into a lightweight Api module "
+                "(e.g. Vendor_SharedApi) that both modules depend on. Use observers or message queues "
+                "instead of direct cross-module calls for loosely-coupled communication.", "High")
+
+        # ── 3. Heavily coupled modules (fan-out) ──────────────────────────────
+        for mod, deps in module_deps.items():
+            if len(deps) >= 6:
+                fp = module_files[mod][0] if module_files.get(mod) else self.app_code
+                dep_list = ", ".join(sorted(deps)[:10])
+                sev = "HIGH" if len(deps) >= 10 else "MEDIUM"
+                self._add(CAT, mod, fp, 1,
+                    f"High Coupling (depends on {len(deps)} modules)",
+                    f"Module {mod} depends on {len(deps)} other custom modules: {dep_list}. "
+                    "High fan-out coupling means changes in any dependency can break this module.",
+                    f"Dependencies: {dep_list}", sev,
+                    "RECOMMENDATION: Apply the Dependency Inversion Principle. Depend on interfaces "
+                    "(Api modules) rather than concrete implementations. Consider splitting this module "
+                    "into smaller, focused modules. Use service contracts at module boundaries.", "High")
+
+        # ── 4. Modules depended upon by many (fan-in — shared utility risk) ──
+        reverse_deps = defaultdict(set)
+        for mod, deps in module_deps.items():
+            for d in deps:
+                reverse_deps[d].add(mod)
+        for mod, dependants in reverse_deps.items():
+            if len(dependants) >= 5:
+                fp = module_files[mod][0] if module_files.get(mod) else self.app_code
+                dep_list = ", ".join(sorted(dependants)[:8])
+                self._add(CAT, mod, fp, 1,
+                    f"Central Module ({len(dependants)} dependants)",
+                    f"Module {mod} is depended upon by {len(dependants)} other modules: {dep_list}. "
+                    "Changes here have a blast radius across the entire codebase.",
+                    f"Dependants: {dep_list}", "MEDIUM",
+                    "RECOMMENDATION: Ensure this module has a stable public API (interfaces in Api/ folder). "
+                    "Avoid breaking changes. Add comprehensive integration tests. "
+                    "Consider versioning the service contracts if multiple teams consume this module.", "Medium")
+
+        # ── 5. Cross-module duplicated method bodies ──────────────────────────
+        # Group methods by body_hash across modules — same logic in different modules
+        hash_to_locations = defaultdict(list)  # hash -> [(module, class, method), ...]
+        for mod, classes in module_method_bodies.items():
+            for cls, methods in classes.items():
+                for method, body_hash in methods.items():
+                    hash_to_locations[body_hash].append((mod, cls, method))
+
+        for body_hash, locations in hash_to_locations.items():
+            modules_involved = set(loc[0] for loc in locations)
+            if len(modules_involved) < 2:
+                continue
+            # Same method body appears in 2+ different modules
+            desc_parts = [f"{loc[0]}::{loc[1]}::{loc[2]}()" for loc in locations[:6]]
+            first_mod = locations[0][0]
+            fp = module_files[first_mod][0] if module_files.get(first_mod) else self.app_code
+            self._add(CAT, ", ".join(sorted(modules_involved)[:3]), fp, 1,
+                f"Duplicated Logic Across {len(modules_involved)} Modules",
+                f"Near-identical method body found in {len(locations)} places across "
+                f"{len(modules_involved)} modules. This is copy-paste duplication that increases "
+                "maintenance burden and bug propagation risk.",
+                "\n".join(desc_parts), "HIGH",
+                "RECOMMENDATION: Extract the shared logic into a common service class in a shared module "
+                "(e.g. Vendor_Common or Vendor_Core). Inject it via DI. If the logic is utility-style, "
+                "create a helper trait or abstract base class. Ensure the consolidated service has "
+                "unit test coverage before removing duplicates.", "Medium")
+
+        # ── 6. Identical class names across modules ───────────────────────────
+        class_basename_map = defaultdict(list)  # basename -> [(module, fqcn), ...]
+        for mod, fqcns in module_classes.items():
+            for fqcn in fqcns:
+                bn = fqcn.rsplit('\\', 1)[-1]
+                class_basename_map[bn].append((mod, fqcn))
+
+        meaningful_names = {'Helper', 'Config', 'Logger', 'Client', 'Service', 'Handler',
+                            'Manager', 'Provider', 'Factory', 'Builder', 'Processor', 'Validator',
+                            'Converter', 'Parser', 'Formatter', 'Exporter', 'Importer', 'Adapter',
+                            'Repository', 'DataProvider', 'Observer', 'Plugin', 'Cron'}
+        for bn, entries in class_basename_map.items():
+            modules_involved = set(e[0] for e in entries)
+            if len(modules_involved) < 2:
+                continue
+            if bn not in meaningful_names and not any(bn.endswith(s) for s in
+                    ('Helper', 'Config', 'Client', 'Service', 'Handler', 'Manager',
+                     'Provider', 'Processor', 'Validator', 'Converter')):
+                continue
+            fqcns = [e[1] for e in entries[:5]]
+            first_mod = entries[0][0]
+            fp = module_files[first_mod][0] if module_files.get(first_mod) else self.app_code
+            self._add(CAT, ", ".join(sorted(modules_involved)[:3]), fp, 1,
+                f"Duplicate Class Pattern: {bn} ({len(modules_involved)} modules)",
+                f"Class '{bn}' exists in {len(modules_involved)} modules with similar purpose. "
+                "This typically indicates copy-pasted utility code that should be consolidated.",
+                "\n".join(fqcns), "MEDIUM",
+                f"RECOMMENDATION: Consolidate into a single shared {bn} in a common module. "
+                "Module-specific variations can extend or compose the shared base. "
+                "This reduces maintenance cost and ensures consistent behaviour across the application.", "Medium")
+
+        # ── 7. Orphan modules (no dependants, not a leaf feature) ─────────────
+        all_modules = set(module_files.keys())
+        leaf_indicators = {'Controller', 'Cron', 'Console', 'Setup', 'Test', 'Block', 'view'}
+        for mod in all_modules:
+            if mod not in reverse_deps and mod in module_deps and module_deps[mod]:
+                # Module depends on others but nobody depends on it
+                files = module_files.get(mod, [])
+                has_entry_points = any(
+                    any(ind in f for ind in leaf_indicators)
+                    for f in files
+                )
+                if not has_entry_points and len(files) > 3:
+                    fp = files[0] if files else self.app_code
+                    self._add(CAT, mod, fp, 1,
+                        f"Potentially Unused Module",
+                        f"Module {mod} depends on {len(module_deps[mod])} modules but no other custom "
+                        "module depends on it, and it has no visible entry points (controllers, cron, console).",
+                        f"Depends on: {', '.join(sorted(module_deps[mod])[:5])}", "MEDIUM",
+                        "RECOMMENDATION: Verify if this module is actually used. Check for di.xml preferences, "
+                        "event observers, plugins, or webapi.xml routes that may not show in static analysis. "
+                        "If truly unused, remove it to reduce codebase complexity and deployment time.", "Low")
+
+        # ── 8. Missing module.xml <sequence> for detected dependencies ────────
+        for f in xml:
+            if not f.endswith('module.xml'):
+                continue
+            content = self._read(f)
+            mod = self._module(f)
+            if not content or mod == "Unknown":
+                continue
+            actual_deps = module_deps.get(mod, set())
+            if not actual_deps:
+                continue
+            # Parse declared sequences
+            declared_seqs = set()
+            for seq_m in re.finditer(r'<module\s+name="([^"]+)"', content):
+                # Sequence modules are listed as children of <sequence>
+                pass
+            # Check if <sequence> block exists
+            seq_block = re.search(r'<sequence>(.*?)</sequence>', content, re.DOTALL)
+            declared_mods = set()
+            if seq_block:
+                for sm in re.finditer(r'name="([^"]+)"', seq_block.group(1)):
+                    declared_mods.add(sm.group(1).replace('::', '_').replace('\\', '_'))
+            # Convert dependency names to Magento format (Vendor_Module)
+            missing_seqs = []
+            for dep in actual_deps:
+                # Check if it exists as a module
+                if dep in all_modules and dep not in declared_mods:
+                    missing_seqs.append(dep)
+            if missing_seqs and len(missing_seqs) >= 2:
+                self._add(CAT, mod, f, 1,
+                    f"Missing module.xml Sequence ({len(missing_seqs)} deps)",
+                    f"Module {mod} uses code from {len(missing_seqs)} modules not declared in <sequence>: "
+                    f"{', '.join(sorted(missing_seqs)[:5])}. This can cause class-not-found errors "
+                    "if modules load in wrong order.",
+                    f"Missing: {', '.join(sorted(missing_seqs)[:8])}", "HIGH",
+                    "RECOMMENDATION: Add all dependencies to module.xml <sequence> block: "
+                    "<sequence>" + "".join(f'<module name="{m.replace("_", "_")}"/>' for m in sorted(missing_seqs)[:3]) +
+                    "</sequence>. This ensures correct module loading order during setup:upgrade "
+                    "and prevents intermittent failures.", "Low")
+
+        # ── 9. Cross-module event flow analysis ───────────────────────────────
+        # Map dispatched events to their observers across modules
+        event_dispatchers = defaultdict(list)   # event_name -> [(module, file), ...]
+        event_observers_map = defaultdict(list)  # event_name -> [(module, observer_class), ...]
+
+        for f in php:
+            mod = self._module(f)
+            if mod == "Unknown":
+                continue
+            content = self._read(f)
+            if not content:
+                continue
+            for ev_m in re.finditer(r'eventManager->dispatch\s*\(\s*[\'"]([^\'"]+)[\'"]', content):
+                event_dispatchers[ev_m.group(1)].append((mod, f))
+
+        for f in xml:
+            if not f.endswith('events.xml'):
+                continue
+            mod = self._module(f)
+            content = self._read(f)
+            if not content or mod == "Unknown":
+                continue
+            for ev_m in re.finditer(r'<event\s+name="([^"]+)"', content):
+                event_name = ev_m.group(1)
+                # Find observers for this event
+                event_block = re.search(
+                    rf'<event\s+name="{re.escape(event_name)}"[^>]*>(.*?)</event>',
+                    content, re.DOTALL
+                )
+                if event_block:
+                    for obs_m in re.finditer(r'instance="([^"]+)"', event_block.group(1)):
+                        event_observers_map[event_name].append((mod, obs_m.group(1)))
+
+        # Find events with cross-module implications (dispatched in one, observed in another)
+        for event_name, dispatchers in event_dispatchers.items():
+            observers = event_observers_map.get(event_name, [])
+            if not observers:
+                continue
+            dispatcher_mods = set(d[0] for d in dispatchers)
+            observer_mods = set(o[0] for o in observers)
+            cross_mods = observer_mods - dispatcher_mods
+            if cross_mods:
+                fp = dispatchers[0][1]
+                all_mods = dispatcher_mods | observer_mods
+                self._add(CAT, ", ".join(sorted(all_mods)[:3]), fp, 1,
+                    f"Cross-Module Event Flow: {event_name}",
+                    f"Event '{event_name}' dispatched by {', '.join(sorted(dispatcher_mods))} "
+                    f"and observed by {', '.join(sorted(observer_mods))}. "
+                    "This is an implicit cross-module dependency — changes to the event payload "
+                    "or removal can silently break observers.",
+                    f"Dispatchers: {', '.join(sorted(dispatcher_mods))}\n"
+                    f"Observers: {', '.join(sorted(observer_mods))}", "INFO",
+                    "RECOMMENDATION: Document the event contract (payload fields, when dispatched). "
+                    "Add the dispatcher module to observer module's <sequence> in module.xml. "
+                    "Consider replacing implicit event coupling with explicit service contracts "
+                    "for critical business flows (order, payment, inventory).", "Low")
+
+        # ── 10. Plugin chain cross-module analysis ────────────────────────────
+        plugin_targets = defaultdict(list)  # target_class -> [(module, plugin_class, methods), ...]
+        for f in xml:
+            if not f.endswith('di.xml'):
+                continue
+            mod = self._module(f)
+            content = self._read(f)
+            if not content or mod == "Unknown":
+                continue
+            for plug_m in re.finditer(
+                r'<type\s+name="([^"]+)"[^>]*>.*?<plugin[^>]+name="([^"]+)"[^>]*/?>',
+                content, re.DOTALL
+            ):
+                target = plug_m.group(1)
+                plugin_name = plug_m.group(2)
+                plugin_targets[target].append((mod, plugin_name))
+
+        for target, plugins in plugin_targets.items():
+            modules_involved = set(p[0] for p in plugins)
+            if len(modules_involved) >= 2:
+                fp = self.app_code
+                for m in modules_involved:
+                    if module_files.get(m):
+                        fp = module_files[m][0]
+                        break
+                plugin_list = [f"{p[0]}::{p[1]}" for p in plugins[:5]]
+                self._add(CAT, ", ".join(sorted(modules_involved)[:3]), fp, 1,
+                    f"Multi-Module Plugin Chain: {target.rsplit(chr(92), 1)[-1]}",
+                    f"{len(plugins)} plugins from {len(modules_involved)} modules target "
+                    f"'{target}'. Multiple modules modifying the same class creates fragile "
+                    "behaviour that is hard to debug and test.",
+                    "\n".join(plugin_list), "HIGH" if len(plugins) >= 3 else "MEDIUM",
+                    "RECOMMENDATION: Review plugin execution order (sortOrder). Consider consolidating "
+                    "related plugins into a single module. For complex modification chains, replace "
+                    "with a dedicated service contract or preference. Ensure each plugin has "
+                    "integration tests that cover the full chain.", "Medium")
+
+        # ── Summary ───────────────────────────────────────────────────────────
+        findings = self.findings.get(CAT, [])
+        if findings:
+            sev_counts = Counter(f['severity'] for f in findings)
+            self._add(CAT, "ALL", self.app_code, 0,
+                f"Cross-Module Analysis Summary: {len(findings)} findings",
+                f"Detected {len(findings)} cross-module issues: "
+                f"{sev_counts.get('CRITICAL', 0)} critical, {sev_counts.get('HIGH', 0)} high, "
+                f"{sev_counts.get('MEDIUM', 0)} medium. "
+                f"Modules analyzed: {len(all_modules)}, dependency edges: {sum(len(d) for d in module_deps.values())}.",
+                f"Modules: {len(all_modules)} | Dep edges: {sum(len(d) for d in module_deps.values())} | "
+                f"Circular deps: {len(reported_cycles)} | Cross-module events: "
+                f"{sum(1 for e, d in event_dispatchers.items() if set(o[0] for o in event_observers_map.get(e, [])) - set(dd[0] for dd in d))}",
+                "INFO",
+                "Address circular dependencies and high-coupling modules first. "
+                "Consolidate duplicated logic into shared modules. "
+                "Document cross-module event contracts.", "Low")
 
     # ==================== 29. CODING STANDARDS ====================
 

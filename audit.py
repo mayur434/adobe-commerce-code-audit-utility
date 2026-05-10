@@ -3,7 +3,7 @@
 Adobe Commerce Code Audit Tool v3.0
 =====================================
 Enterprise-grade static code analysis for Adobe Commerce (Magento 2) projects.
-Scans 28 categories and generates an Excel report with charts.
+Scans all configured categories and generates an Excel report with charts and module-wise remediation planning.
 Supports optional DB dump analysis for full database audit.
 
 Usage:
@@ -62,6 +62,7 @@ Examples:
     parser.add_argument("--name", default=None, help="Project name (overrides config)")
     parser.add_argument("--output", default=None, help="Output directory (overrides config)")
     parser.add_argument("--namespace", default=None, help="Custom module namespace (overrides config)")
+    parser.add_argument("--module", default=None, help="Optional targeted re-run filter. Leave empty for the main full-project audit.")
     args = parser.parse_args()
 
     # Load config file
@@ -94,13 +95,21 @@ Examples:
     if db_path:
         db_path = os.path.abspath(db_path)
         if not os.path.isfile(db_path):
-            print(f"❌ Error: DB dump file does not exist: {db_path}")
-            sys.exit(1)
+            if args.db:
+                print(f"❌ Error: DB dump file does not exist: {db_path}")
+                sys.exit(1)
+            print(f"⚠️  Warning: Configured DB dump does not exist, DB audit will be skipped: {db_path}")
+            db_path = None
 
     project_name = args.name or project_cfg.get("name") or (os.path.basename(project_path) if project_path else "DB-Audit")
     output_dir = os.path.abspath(args.output or output_cfg.get("directory", "output"))
     namespace = args.namespace or scanner_cfg.get("namespace", "Custom")
     categories = scanner_cfg.get("categories", None)  # None = all categories
+    module_filter = args.module or scanner_cfg.get("modules")
+    if isinstance(module_filter, str):
+        modules = [m.strip() for m in module_filter.split(",") if m.strip()]
+    else:
+        modules = list(module_filter or [])
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -126,8 +135,8 @@ Examples:
     audit_mode = "+".join(mode_parts)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    branch_part = f"-{branch}" if branch else ""
-    output_file = os.path.join(output_dir, f"{project_name}{branch_part}-{audit_mode}-audit-{timestamp}.xlsx")
+    branch_part = f"-branch-{branch}" if branch else ""
+    output_file = os.path.join(output_dir, f"{project_name}-audit-{audit_mode}-{timestamp}{branch_part}.xlsx")
 
     print(f"📄 Config: {args.config}")
     print(f"   Project: {project_name}")
@@ -143,6 +152,9 @@ Examples:
         print(f"   Git Branch: {branch}")
     if categories:
         print(f"   Categories: {len(categories)} selected")
+    if modules:
+        print(f"   Modules: {', '.join(modules)}")
+        print("   ⚠️  Partial scan mode: use this only for targeted re-runs. Main audit should leave modules empty to cover all modules.")
     if thresholds:
         print(f"   Thresholds: {len(thresholds)} custom values")
     print()
@@ -154,6 +166,7 @@ Examples:
         thresholds=thresholds,
         categories=categories,
         db_dump_path=db_path,
+        modules=modules,
     )
     findings = scanner.scan()
 

@@ -204,6 +204,25 @@ TEMPLATES = {
         "Add focused unit/integration/API tests for the corrected behavior and one "
         "regression test for the failure mode; gate high-risk fixes in CI."
     ),
+    "business_flow_integrity": (
+        "Validate the customization against Adobe Commerce service-layer flow, entity "
+        "state machines, events, indexes, emails, and rollback behavior. Add integration "
+        "tests for checkout/order/customer side effects and retry/idempotency."
+    ),
+    "critical_callback_security": (
+        "Verify authentication/signature, replay protection, idempotency keys, row locking, "
+        "and duplicate/out-of-order handling before changing payment, shipment, refund, or "
+        "inventory state."
+    ),
+    "msi_inventory_api": (
+        "Use MSI service contracts/reservation/source-item APIs instead of legacy stock table "
+        "writes. Test multi-source, salable qty, backorders, cancellations, refunds, and shipment "
+        "deduction behavior."
+    ),
+    "admin_api_least_privilege": (
+        "Apply least-privilege ACL, ownership validation, CSRF/form-key or signed request checks, "
+        "and negative API/admin tests for anonymous, wrong customer, and low-privilege admin access."
+    ),
 }
 
 
@@ -407,6 +426,48 @@ CATEGORY_RULES = {
         "overrides": [
             ("Admin Grid", "deprecated_upgrade", None),
             ("REST API", "acl_least_privilege", None),
+        ],
+    },
+    "Business Customization Review": {
+        "default": "business_flow_integrity",
+        "overrides": [
+            ("Direct Order/Entity State", "business_flow_integrity", "correct_stronger"),
+            ("Direct Save", "business_flow_integrity", "correct_stronger"),
+            ("Synchronous External API", "critical_callback_security", None),
+            ("Hardcoded Business Rule", "validate_general", None),
+        ],
+    },
+    "Critical Commerce Flows": {
+        "default": "business_flow_integrity",
+        "overrides": [
+            ("Webhook/Callback", "critical_callback_security", "correct_stronger"),
+            ("Around Plugin", "plugin_ordering", None),
+            ("collectTotals", "cache_profiling", None),
+        ],
+    },
+    "MSI Inventory & Source Management": {
+        "default": "msi_inventory_api",
+    },
+    "Admin & Integration Security": {
+        "default": "admin_api_least_privilege",
+        "overrides": [
+            ("Inbound Integration", "critical_callback_security", "correct_stronger"),
+            ("Broad WebAPI ACL", "admin_api_least_privilege", "correct_stronger"),
+        ],
+    },
+    "Logical Flow & Cross-Module": {
+        "default": "service_contracts",
+        "overrides": [
+            ("Circular Dependency", "service_contracts", None),
+            ("High Coupling", "service_contracts", None),
+            ("Central Module", "service_contracts", None),
+            ("Duplicated Logic", "service_contracts", None),
+            ("Duplicate Class", "service_contracts", None),
+            ("Unused Module", "validate_general", "needs_review"),
+            ("Missing module.xml Sequence", "validate_general", None),
+            ("Cross-Module Event", "observer_thin", None),
+            ("Multi-Module Plugin", "plugin_ordering", None),
+            ("Cross-Module Analysis Summary", "validate_general", None),
         ],
     },
 

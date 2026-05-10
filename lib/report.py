@@ -14,6 +14,12 @@ from openpyxl.utils import get_column_letter
 from collections import Counter, defaultdict
 from datetime import datetime
 
+try:
+    from lib.expert import get_expert_recommendation
+except Exception:  # pragma: no cover - report should still work if expert engine is unavailable
+    def get_expert_recommendation(category, issue_type, severity="MEDIUM", effort="Medium"):
+        return "Validate finding against execution path, confirm Adobe Commerce compatibility, add targeted tests, and roll out safely."
+
 from lib.styles import (
     TITLE_FONT, SUBTITLE_FONT, HEADER_FONT, HEADER_FILL, HEADER_BORDER,
     SUMMARY_LABEL_FONT, SUMMARY_VALUE_FONT, BODY_FONT, BODY_FONT_BOLD,
@@ -49,7 +55,9 @@ class AuditReportGenerator:
             "XML Configuration", "WebAPI & ACL", "DB Schema",
             "Infrastructure", "Cloud Deployment", "PHP Deep Analysis",
             "Event Observers", "Module Architecture", "Code Metrics",
-            "Business Logic Identification",
+            "Business Logic Identification", "Business Customization Review",
+            "Critical Commerce Flows", "MSI Inventory & Source Management",
+            "Admin & Integration Security", "Logical Flow & Cross-Module",
             # DB dump analysis categories
             "DB: Table Structure", "DB: Index Analysis", "DB: Column Analysis",
             "DB: Foreign Keys", "DB: Naming Conventions", "DB: Storage Engine",
@@ -62,6 +70,8 @@ class AuditReportGenerator:
 
         self._sheet_recommendations()
         self._sheet_action_plan()
+        self._sheet_module_rollout_summary()
+        self._sheet_module_plan()
         self._sheet_charts()
 
         self.wb.save(output_path)
@@ -391,17 +401,17 @@ class AuditReportGenerator:
         crit_cnt = sum(1 for x in sevs if x == "CRITICAL")
         high_cnt = sum(1 for x in sevs if x == "HIGH")
         banner = f"{category}  —  {len(items)} findings  |  {crit_cnt} Critical  |  {high_cnt} High"
-        ws.merge_cells('A1:J1')
+        ws.merge_cells('A1:K1')
         b_cell = ws.cell(row=1, column=1, value=banner)
         b_cell.font = Font(name='Calibri', bold=True, size=12, color='FFFFFF')
         b_cell.fill = PatternFill(start_color=tab_color, end_color=tab_color, fill_type='solid')
         b_cell.alignment = Alignment(horizontal='left', vertical='center')
         ws.row_dimensions[1].height = 30
-        for c in range(1, 11):
+        for c in range(1, 12):
             ws.cell(row=1, column=c).fill = PatternFill(start_color=tab_color, end_color=tab_color, fill_type='solid')
 
         # --- Header row ---
-        headers = ["#", "Module", "File Path", "Line #", "Issue Type", "Description", "Code Context", "Severity", "Recommendation", "Effort"]
+        headers = ["#", "Module", "File Path", "Line #", "Issue Type", "Description", "Code Context", "Severity", "Recommendation", "Expert Validation & Recommendation", "Effort"]
         for c, h in enumerate(headers, 1):
             cell = ws.cell(row=2, column=c, value=h)
             cell.font = HEADER_FONT
@@ -410,7 +420,7 @@ class AuditReportGenerator:
             cell.border = HEADER_BORDER
         ws.row_dimensions[2].height = 28
         ws.freeze_panes = 'A3'
-        ws.auto_filter.ref = f"A2:J2"
+        ws.auto_filter.ref = f"A2:K2"
 
         # --- Data rows ---
         for idx, item in enumerate(items, 1):
@@ -426,7 +436,8 @@ class AuditReportGenerator:
             code_cell.font = CODE_FONT
             ws.cell(row=r, column=8, value=item["severity"])
             ws.cell(row=r, column=9, value=item["recommendation"])
-            ws.cell(row=r, column=10, value=item["effort"])
+            ws.cell(row=r, column=10, value=get_expert_recommendation(category, item["type"], item["severity"], item.get("effort", "Medium")))
+            ws.cell(row=r, column=11, value=item["effort"])
 
         mr = len(items) + 2
         color_severity_col(ws, 8, mr)
@@ -434,9 +445,9 @@ class AuditReportGenerator:
 
         # Style effort column as centered
         for r in range(3, mr + 1):
-            ws.cell(row=r, column=10).alignment = CENTER_TOP
+            ws.cell(row=r, column=11).alignment = CENTER_TOP
 
-        widths = [6, 28, 55, 8, 28, 60, 55, 12, 65, 10]
+        widths = [6, 28, 55, 8, 28, 60, 55, 12, 65, 75, 10]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -726,5 +737,274 @@ class AuditReportGenerator:
             ws.cell(row=r, column=5).alignment = CENTER_TOP
 
         widths = [20, 58, 25, 42, 12, 52, 14]
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+
+    # ---------- Module Rollout Summary ----------
+
+    def _module_domain(self, module_name):
+        """Return a Commerce business/technical domain for rollout grouping."""
+        m = (module_name or "").lower()
+        if any(x in m for x in ["payment", "pay", "razor", "stripe", "paypal", "cashfree", "refund", "invoice", "creditmemo"]):
+            return "Payment / Invoice / Refund"
+        if any(x in m for x in ["checkout", "quote", "cart", "coupon", "promo", "salesrule", "shipping", "address", "tax"]):
+            return "Checkout / Quote / Shipping / Tax"
+        if any(x in m for x in ["sales", "order", "shipment", "rma", "return"]):
+            return "Order / Fulfilment"
+        if any(x in m for x in ["inventory", "msi", "stock", "source", "warehouse", "erp", "sap", "wms"]):
+            return "Inventory / MSI / ERP"
+        if any(x in m for x in ["customer", "login", "otp", "account", "loyalty", "reward", "wallet"]):
+            return "Customer / Identity / Loyalty"
+        if any(x in m for x in ["catalog", "product", "category", "search", "elastic", "opensearch", "price", "pricing"]):
+            return "Catalog / Search / Pricing"
+        if any(x in m for x in ["admin", "acl", "api", "graphql", "webapi", "integration", "webhook"]):
+            return "Admin / API / Integration"
+        if any(x in m for x in ["theme", "frontend", "widget", "banner", "cms", "pagebuilder", "ui"]):
+            return "Frontend / CMS / Theme"
+        if any(x in m for x in ["cron", "queue", "message", "cache", "redis", "varnish", "cloud", "deploy", "logger", "log"]):
+            return "Platform / Infra / Operations"
+        return "Core / Shared / Other"
+
+    def _rollout_wave(self, domain, crit, high, med, total):
+        """Recommend a safe remediation wave for production rollout planning."""
+        if crit > 0 and domain in ["Payment / Invoice / Refund", "Checkout / Quote / Shipping / Tax", "Admin / API / Integration"]:
+            return "Wave 0 - Security / Revenue Critical"
+        if crit > 0:
+            return "Wave 1 - Critical Stabilization"
+        if high > 0 and domain in ["Payment / Invoice / Refund", "Checkout / Quote / Shipping / Tax", "Order / Fulfilment", "Inventory / MSI / ERP"]:
+            return "Wave 2 - Business Flow Hardening"
+        if high > 0:
+            return "Wave 3 - Technical Risk Reduction"
+        if med > 0:
+            return "Wave 4 - Maintainability / Performance"
+        return "Wave 5 - Low Risk Cleanup"
+
+    def _deployment_caution(self, domain, crit, high):
+        if domain == "Payment / Invoice / Refund":
+            return "Deploy separately with payment sandbox validation, webhook replay tests, refund/invoice regression, and rollback plan."
+        if domain == "Checkout / Quote / Shipping / Tax":
+            return "Deploy with checkout/cart regression, coupon/tax/shipping matrix, cache warmup, and order placement smoke tests."
+        if domain == "Order / Fulfilment":
+            return "Validate order state transitions, invoice/shipment/credit memo lifecycle, emails, ERP sync, and admin operations."
+        if domain == "Inventory / MSI / ERP":
+            return "Validate salable qty, reservations, source deduction, cancellations, refunds, backorders, and ERP reconciliation."
+        if domain == "Admin / API / Integration":
+            return "Validate ACL, tokens, API contracts, callback signatures, rate limiting, and integration negative scenarios."
+        if domain == "Catalog / Search / Pricing":
+            return "Validate reindexing, price rules, search relevance, category/product cache tags, and product detail/category pages."
+        if domain == "Frontend / CMS / Theme":
+            return "Validate FPC behavior, private content, CSP, JS bundling, checkout impact, and key responsive journeys."
+        if domain == "Platform / Infra / Operations":
+            return "Coordinate with deployment window; validate cron/queue/cache/Redis/Varnish/OpenSearch and monitoring dashboards."
+        if crit or high:
+            return "Deploy in a controlled release with targeted functional, integration, and rollback validation."
+        return "Can be batched with similar low-risk modules after automated tests pass."
+
+    def _sheet_module_rollout_summary(self):
+        """Create a concise module-by-module remediation/deployment planning sheet.
+
+        The audit itself is expected to scan the complete project. This sheet is
+        for planning fixes and production rollout in safe module/domain waves.
+        """
+        ws = self.wb.create_sheet("Module Rollout Summary")
+        ws.sheet_properties.tabColor = "8064A2"
+
+        headers = [
+            "Wave", "Module", "Domain", "Total", "Critical", "High", "Medium", "Low", "Info",
+            "Risk Score", "Deployment / Validation Recommendation"
+        ]
+        for c, h in enumerate(headers, 1):
+            ws.cell(row=1, column=c, value=h)
+        style_header_row(ws, len(headers))
+        ws.freeze_panes = 'A2'
+        ws.auto_filter.ref = "A1:K1"
+
+        sev_weight = {"CRITICAL": 10000, "HIGH": 1000, "MEDIUM": 100, "LOW": 10, "INFO": 1}
+        modules = defaultdict(list)
+        for cat, items in self.findings.items():
+            for item in items:
+                modules[item.get("module", "Unknown")].append(item)
+
+        rows = []
+        for mod, items in modules.items():
+            counts = Counter(i.get("severity", "INFO") for i in items)
+            crit = counts.get("CRITICAL", 0)
+            high = counts.get("HIGH", 0)
+            med = counts.get("MEDIUM", 0)
+            low = counts.get("LOW", 0)
+            info = counts.get("INFO", 0)
+            total = len(items)
+            score = sum(sev_weight.get(i.get("severity", "INFO"), 1) for i in items)
+            domain = self._module_domain(mod)
+            wave = self._rollout_wave(domain, crit, high, med, total)
+            caution = self._deployment_caution(domain, crit, high)
+            rows.append([wave, mod, domain, total, crit, high, med, low, info, score, caution])
+
+        wave_order = {
+            "Wave 0 - Security / Revenue Critical": 0,
+            "Wave 1 - Critical Stabilization": 1,
+            "Wave 2 - Business Flow Hardening": 2,
+            "Wave 3 - Technical Risk Reduction": 3,
+            "Wave 4 - Maintainability / Performance": 4,
+            "Wave 5 - Low Risk Cleanup": 5,
+        }
+        rows.sort(key=lambda r: (wave_order.get(r[0], 99), -r[9], r[1]))
+
+        for r, row in enumerate(rows, 2):
+            for c, val in enumerate(row, 1):
+                ws.cell(row=r, column=c, value=val)
+
+        mr = max(1, len(rows) + 1)
+        color_priority_col(ws, 1, mr)
+        apply_zebra_and_borders(ws, mr, len(headers), data_start=2)
+        for r in range(2, mr + 1):
+            for c in [4, 5, 6, 7, 8, 9, 10]:
+                ws.cell(row=r, column=c).alignment = CENTER_TOP
+        widths = [34, 32, 32, 10, 10, 10, 10, 10, 10, 12, 90]
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+    # ---------- Module Execution Plan ----------
+
+    def _sheet_module_plan(self):
+        """Generate a module-grouped execution plan sheet.
+
+        Groups ALL findings by module, sorted by severity priority so teams
+        can target one module at a time for production deployment.  Every
+        single finding — including LOW and INFO — is listed so nothing is
+        missed during fixes.
+        """
+        ws = self.wb.create_sheet("Module Execution Plan")
+        ws.sheet_properties.tabColor = "7030A0"
+
+        # ── Banner ────────────────────────────────────────────────────────
+        ws.merge_cells('A1:K1')
+        b = ws.cell(row=1, column=1,
+                    value="MODULE-WISE EXECUTION PLAN — Fix & Deploy Module by Module")
+        b.font = Font(name='Calibri', bold=True, size=13, color='FFFFFF')
+        b.fill = PatternFill(start_color='7030A0', end_color='7030A0', fill_type='solid')
+        b.alignment = Alignment(horizontal='left', vertical='center')
+        ws.row_dimensions[1].height = 32
+        for c in range(1, 12):
+            ws.cell(row=1, column=c).fill = PatternFill(
+                start_color='7030A0', end_color='7030A0', fill_type='solid')
+
+        # ── Subtitle ─────────────────────────────────────────────────────
+        ws.merge_cells('A2:K2')
+        sub = ws.cell(row=2, column=1,
+                      value="Modules ordered by risk (critical-count → high-count → total). "
+                            "Deploy fixes per module to reduce blast radius. "
+                            "Every severity level is included — nothing is skipped.")
+        sub.font = Font(name='Calibri', italic=True, size=10, color='666666')
+        sub.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+        ws.row_dimensions[2].height = 28
+
+        # ── Header row ───────────────────────────────────────────────────
+        headers = [
+            "#", "Module", "Priority", "Category", "Severity",
+            "Issue Type", "File", "Line", "Description",
+            "Recommendation", "Effort",
+        ]
+        for c, h in enumerate(headers, 1):
+            cell = ws.cell(row=3, column=c, value=h)
+            cell.font = HEADER_FONT
+            cell.fill = HEADER_FILL
+            cell.alignment = CENTER_ALIGN
+            cell.border = HEADER_BORDER
+        ws.row_dimensions[3].height = 28
+        ws.freeze_panes = 'A4'
+        ws.auto_filter.ref = f"A3:K3"
+
+        # ── Collect & sort by module risk ─────────────────────────────────
+        SEV_WEIGHT = {"CRITICAL": 10000, "HIGH": 1000, "MEDIUM": 100, "LOW": 10, "INFO": 1}
+
+        # Aggregate per module
+        mod_items = defaultdict(list)
+        mod_scores = Counter()
+        for cat, items in self.findings.items():
+            for item in items:
+                mod = item.get("module", "Unknown")
+                mod_items[mod].append({**item, "_category": cat})
+                mod_scores[mod] += SEV_WEIGHT.get(item["severity"], 1)
+
+        # Sort modules: highest risk first
+        sorted_modules = sorted(mod_items.keys(),
+                                key=lambda m: -mod_scores[m])
+
+        # Within each module, sort items: CRITICAL first, then HIGH, etc.
+        SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+
+        row = 4
+        seq = 0
+        for mod_idx, mod in enumerate(sorted_modules):
+            items = sorted(mod_items[mod],
+                           key=lambda x: (SEV_ORDER.get(x["severity"], 5), x["_category"]))
+
+            # Module-level counts
+            crit = sum(1 for i in items if i["severity"] == "CRITICAL")
+            high = sum(1 for i in items if i["severity"] == "HIGH")
+            med = sum(1 for i in items if i["severity"] == "MEDIUM")
+            low = sum(1 for i in items if i["severity"] == "LOW")
+            info = sum(1 for i in items if i["severity"] == "INFO")
+
+            # Determine module priority
+            if crit > 0:
+                mod_priority = "P0 — Immediate"
+            elif high > 0:
+                mod_priority = "P1 — This Sprint"
+            elif med > 0:
+                mod_priority = "P2 — Next Sprint"
+            else:
+                mod_priority = "P3 — Backlog"
+
+            # ── Module section header row ─────────────────────────────────
+            ws.merge_cells(f'A{row}:K{row}')
+            header_text = (
+                f"▸ {mod}  |  {mod_priority}  |  "
+                f"{len(items)} findings  |  "
+                f"C:{crit}  H:{high}  M:{med}  L:{low}  I:{info}"
+            )
+            sec_cell = ws.cell(row=row, column=1, value=header_text)
+            sec_color = 'FF0000' if crit > 0 else 'FF6600' if high > 0 else 'FFCC00' if med > 0 else '92D050'
+            sec_cell.font = Font(name='Calibri', bold=True, size=11, color='FFFFFF')
+            sec_cell.fill = PatternFill(start_color=sec_color, end_color=sec_color, fill_type='solid')
+            sec_cell.alignment = Alignment(horizontal='left', vertical='center')
+            for c in range(1, 12):
+                ws.cell(row=row, column=c).fill = PatternFill(
+                    start_color=sec_color, end_color=sec_color, fill_type='solid')
+            ws.row_dimensions[row].height = 26
+            row += 1
+
+            # ── Item rows ─────────────────────────────────────────────────
+            for item in items:
+                seq += 1
+                ws.row_dimensions[row].height = 30
+                ws.cell(row=row, column=1, value=seq)
+                ws.cell(row=row, column=2, value=mod)
+                ws.cell(row=row, column=3, value=mod_priority)
+                ws.cell(row=row, column=4, value=item["_category"])
+                ws.cell(row=row, column=5, value=item["severity"])
+                ws.cell(row=row, column=6, value=item["type"])
+                ws.cell(row=row, column=7, value=item["file"])
+                ws.cell(row=row, column=8, value=item["line"])
+                ws.cell(row=row, column=9, value=item["description"][:200])
+                ws.cell(row=row, column=10, value=item["recommendation"][:300])
+                ws.cell(row=row, column=11, value=item["effort"])
+                row += 1
+
+        mr = row - 1
+
+        # ── Apply styling ─────────────────────────────────────────────────
+        color_severity_col(ws, 5, mr)
+        color_priority_col(ws, 3, mr)
+        apply_zebra_and_borders(ws, mr, len(headers), data_start=4)
+
+        for r in range(4, mr + 1):
+            ws.cell(row=r, column=1).alignment = CENTER_TOP
+            ws.cell(row=r, column=8).alignment = CENTER_TOP
+            ws.cell(row=r, column=11).alignment = CENTER_TOP
+
+        widths = [6, 30, 20, 28, 12, 32, 48, 8, 55, 60, 10]
         for i, w in enumerate(widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = w

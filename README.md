@@ -1,87 +1,92 @@
-# Adobe Commerce Code Audit Tool v3.0
+# Adobe Commerce Code Audit Tool v3.2
 
 Enterprise-grade static code analysis for **Adobe Commerce / Magento 2** projects.
 
-Scans **27 audit categories** across PHP, XML, PHTML, and infrastructure config files, then generates a comprehensive Excel report with charts, recommendations, and a prioritized action plan.
+The utility scans PHP, XML, PHTML, frontend assets, Cloud/infrastructure config, and optional SQL dumps, then generates a detailed Excel report with severity, remediation, expert validation, action planning, charts, and module-level rollout planning.
 
 ---
 
-## Features
+## Key capabilities
 
-- **27 scanners**: Exception Handling, Security, Database, Caching, Performance, Deprecated Code, Logging, File Storage, DI, Plugins, Cron, GraphQL, Queues, Config, Frontend, XML Config, WebAPI & ACL, DB Schema, Infrastructure, Cloud Deployment, PHP Deep Analysis, Event Observers, Module Architecture, Code Metrics, and more.
-- **Excel report** with:
-  - Executive Summary (severity & category breakdown, top risk modules)
-  - Per-category detail sheets with color-coded severity, code context, and recommendations
-  - Recommendations sheet (60+ actionable items grouped by area)
-  - Prioritized Action Plan (P0–P4 with sprint mapping)
-  - Charts sheet (pie, bar, stacked bar)
-- **Zero dependencies on the scanned project** — pure Python, only needs `openpyxl`.
+- **40+ code and DB audit areas**, including security, coding standards, exception handling, DI, plugins, observers, cron, queues, GraphQL, WebAPI/ACL, DB schema, database dump analysis, Cloud deployment, caching, frontend templates, UI/layout XML, Composer/dependencies, backward compatibility, and infrastructure.
+- **Business customization review** for high-blast-radius flows such as checkout, quote, order, payment, refund, shipping, inventory, customer, promotions, and external integrations.
+- **Critical commerce flow checks** for risky around plugins, `collectTotals()` use, webhook/idempotency gaps, direct entity state mutation, synchronous external calls, and notifications coupled to transactions.
+- **MSI / inventory review** for legacy stock writes, direct inventory table access, salable quantity assumptions, reservations, multi-source behavior, backorders, cancellations, refunds, and shipment source deduction.
+- **Admin and integration security review** for admin ACL, WebAPI resources, anonymous/customer API exposure, webhook signature validation, replay protection, and negative test expectations.
+- **Full-project scanning by default** across all custom modules, with module-wise remediation and production rollout planning in the generated report.
+- Optional `--module` / `scanner.modules` filter is retained only for targeted re-runs, debugging, or validating a specific remediation batch after the full audit is complete.
+- **Expert validation column** in every detail sheet to validate whether the base recommendation is aligned, needs stronger controls, may be a false positive, or needs rollout caution.
 
 ## Requirements
 
 - Python 3.8+
-- `openpyxl` (install via `pip`)
-
-## Installation
+- `openpyxl`
 
 ```bash
-git clone <repo-url> adobe-commerce-audit
-cd adobe-commerce-audit
 pip install -r requirements.txt
 ```
 
 ## Usage
 
 ```bash
-# Basic — scans project root, outputs to output/ directory
+# Scan full codebase using config.json
+python3 audit.py
+
+# Scan code only
 python3 audit.py --path /path/to/magento2-project
 
-# Custom project name
-python3 audit.py --path /path/to/project --name "My Client"
+# Optional targeted re-run after the full audit, only for validating a specific fix batch
+python3 audit.py --path /path/to/magento2-project --module Vendor_Checkout,Vendor_Payment
 
-# Custom output directory
-python3 audit.py --path /path/to/project --output ./reports
+# Scan code and DB dump
+python3 audit.py --path /path/to/project --db /path/to/prod-dump.sql
 
-# Custom namespace (default: Custom)
-python3 audit.py --path /path/to/project --namespace VijaySales
+# Custom output and name
+python3 audit.py --path /path/to/project --name "Client Name" --output ./reports
+
+# Use a custom config
+python3 audit.py --config project-audit.json
 ```
 
-### CLI Options
+## CLI options
 
-| Option         | Default     | Description                                  |
-|---------------|-------------|----------------------------------------------|
-| `--path`      | (required)  | Path to Adobe Commerce project root          |
-| `--name`      | dir name    | Project name for the report title            |
-| `--output`    | `output/`   | Output directory for the Excel report        |
-| `--namespace` | `Custom`    | Custom module namespace to scan              |
+| Option | Description |
+|---|---|
+| `--config` | Path to config JSON. Defaults to `config.json`. |
+| `--path` | Adobe Commerce project root. Overrides `project.path`. |
+| `--db` | SQL dump path. Overrides `database.dump_path`. Invalid CLI-provided DB path is treated as an error. Invalid config-only DB path is skipped with a warning. |
+| `--name` | Project/report name. |
+| `--output` | Output directory. |
+| `--namespace` | Custom namespace hint. |
+| `--module` | Optional targeted filter for re-runs only. Leave empty for the main audit so all modules are covered. |
 
-## Project Structure
+## Module-by-module remediation planning
 
-```
-adobe-commerce-audit/
-├── audit.py              # CLI entry point
-├── lib/
-│   ├── __init__.py       # Package metadata (version)
-│   ├── scanner.py        # AdobeCommerceAuditScanner — 27 scan methods
-│   ├── report.py         # AuditReportGenerator — Excel report + charts
-│   └── styles.py         # Excel styles, colors, formatting helpers
-├── output/               # Generated reports (gitignored)
-├── requirements.txt
-├── .gitignore
-└── README.md
-```
+Run the main audit against the **entire Adobe Commerce project**. Do not split the audit by module, because cross-module plugins, observers, preferences, layout updates, shared services, WebAPI routes, queues, cron jobs, and database changes can create hidden dependencies.
+
+Use the generated **Module Rollout Summary** and **Module Execution Plan** sheets to plan fixes and deployments module by module. Optional `--module` runs should be used only after the full audit, for targeted re-validation of a module or release batch.
+
+Recommended rollout order:
+
+1. Security, admin/API ACL, webhooks, payment callbacks, and secrets.
+2. Checkout, quote, payment, order, invoice, shipment, credit memo, and refund flows.
+3. Inventory/MSI, source selection, salable qty, reservations, and ERP integrations.
+4. DB schema/indexes, performance, caching/FPC/private content, queues, and cron.
+5. Code structure, coding standards, tests, frontend assets, and documentation.
 
 ## Output
 
-The tool generates a timestamped `.xlsx` file (e.g., `MyProject-code-audit-20250101_120000.xlsx`) with ~30 sheets:
+The generated Excel workbook contains:
 
-1. **Executive Summary** — severity breakdown, category breakdown, top risk modules
-2. **27 category sheets** — detailed findings with module, file, line, code context, severity, recommendation
-3. **Recommendations** — 60+ actionable items with area color-coding, effort, priority
-4. **Action Plan** — P0–P4 prioritized items mapped to sprints
-5. **Charts** — severity pie, top modules bar, category stacked bar
+- Executive Summary
+- Per-category finding sheets
+- Expert Validation & Recommendation column on every detail sheet
+- Recommendations
+- Action Plan
+- Module Rollout Summary
+- Module Execution Plan
+- Charts
 
-## License
+## Notes
 
-MIT
-# adobe-commerce-audit
+Static analysis can identify risky patterns and probable edge cases, but critical business findings must be validated against runtime behavior, store configuration, third-party modules, integrations, and production-like data. Treat generated recommendations as a review accelerator, not as a replacement for architecture review and regression testing.

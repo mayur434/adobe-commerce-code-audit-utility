@@ -37,6 +37,7 @@
             "Module Architecture",
             "Code Metrics",
             "Business Logic Identification",
+            "Logical Flow & Cross-Module",
             "Coding Standards",
             "Input Validation & XSS",
             "Frontend Assets",
@@ -55,8 +56,13 @@
             "DB: Charset & Collation",
             "DB: Adobe Commerce Schema",
             "DB: Data Integrity",
-            "DB: Performance"
-        ]
+            "DB: Performance",
+            "Admin & Integration Security",
+            "MSI Inventory & Source Management",
+            "Critical Commerce Flows",
+            "Business Customization Review"
+        ],
+        "modules": []
     },
     "database": {
         "dump_path": "/Users/mayur.parmar/Downloads/prod-db-bkp.sql"

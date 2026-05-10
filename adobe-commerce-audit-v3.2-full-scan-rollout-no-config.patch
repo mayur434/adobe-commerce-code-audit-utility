@@ -1,0 +1,781 @@
+diff --git a/README.md b/README.md
+index f7b4b6e..1a9bc84 100644
+--- a/README.md
++++ b/README.md
+@@ -1,87 +1,92 @@
+-# Adobe Commerce Code Audit Tool v3.0
++# Adobe Commerce Code Audit Tool v3.2
+ 
+ Enterprise-grade static code analysis for **Adobe Commerce / Magento 2** projects.
+ 
+-Scans **27 audit categories** across PHP, XML, PHTML, and infrastructure config files, then generates a comprehensive Excel report with charts, recommendations, and a prioritized action plan.
++The utility scans PHP, XML, PHTML, frontend assets, Cloud/infrastructure config, and optional SQL dumps, then generates a detailed Excel report with severity, remediation, expert validation, action planning, charts, and module-level rollout planning.
+ 
+ ---
+ 
+-## Features
++## Key capabilities
+ 
+-- **27 scanners**: Exception Handling, Security, Database, Caching, Performance, Deprecated Code, Logging, File Storage, DI, Plugins, Cron, GraphQL, Queues, Config, Frontend, XML Config, WebAPI & ACL, DB Schema, Infrastructure, Cloud Deployment, PHP Deep Analysis, Event Observers, Module Architecture, Code Metrics, and more.
+-- **Excel report** with:
+-  - Executive Summary (severity & category breakdown, top risk modules)
+-  - Per-category detail sheets with color-coded severity, code context, and recommendations
+-  - Recommendations sheet (60+ actionable items grouped by area)
+-  - Prioritized Action Plan (P0–P4 with sprint mapping)
+-  - Charts sheet (pie, bar, stacked bar)
+-- **Zero dependencies on the scanned project** — pure Python, only needs `openpyxl`.
++- **40+ code and DB audit areas**, including security, coding standards, exception handling, DI, plugins, observers, cron, queues, GraphQL, WebAPI/ACL, DB schema, database dump analysis, Cloud deployment, caching, frontend templates, UI/layout XML, Composer/dependencies, backward compatibility, and infrastructure.
++- **Business customization review** for high-blast-radius flows such as checkout, quote, order, payment, refund, shipping, inventory, customer, promotions, and external integrations.
++- **Critical commerce flow checks** for risky around plugins, `collectTotals()` use, webhook/idempotency gaps, direct entity state mutation, synchronous external calls, and notifications coupled to transactions.
++- **MSI / inventory review** for legacy stock writes, direct inventory table access, salable quantity assumptions, reservations, multi-source behavior, backorders, cancellations, refunds, and shipment source deduction.
++- **Admin and integration security review** for admin ACL, WebAPI resources, anonymous/customer API exposure, webhook signature validation, replay protection, and negative test expectations.
++- **Full-project scanning by default** across all custom modules, with module-wise remediation and production rollout planning in the generated report.
++- Optional `--module` / `scanner.modules` filter is retained only for targeted re-runs, debugging, or validating a specific remediation batch after the full audit is complete.
++- **Expert validation column** in every detail sheet to validate whether the base recommendation is aligned, needs stronger controls, may be a false positive, or needs rollout caution.
+ 
+ ## Requirements
+ 
+ - Python 3.8+
+-- `openpyxl` (install via `pip`)
+-
+-## Installation
++- `openpyxl`
+ 
+ ```bash
+-git clone <repo-url> adobe-commerce-audit
+-cd adobe-commerce-audit
+ pip install -r requirements.txt
+ ```
+ 
+ ## Usage
+ 
+ ```bash
+-# Basic — scans project root, outputs to output/ directory
++# Scan full codebase using config.json
++python3 audit.py
++
++# Scan code only
+ python3 audit.py --path /path/to/magento2-project
+ 
+-# Custom project name
+-python3 audit.py --path /path/to/project --name "My Client"
++# Optional targeted re-run after the full audit, only for validating a specific fix batch
++python3 audit.py --path /path/to/magento2-project --module Vendor_Checkout,Vendor_Payment
+ 
+-# Custom output directory
+-python3 audit.py --path /path/to/project --output ./reports
++# Scan code and DB dump
++python3 audit.py --path /path/to/project --db /path/to/prod-dump.sql
+ 
+-# Custom namespace (default: Custom)
+-python3 audit.py --path /path/to/project --namespace VijaySales
++# Custom output and name
++python3 audit.py --path /path/to/project --name "Client Name" --output ./reports
++
++# Use a custom config
++python3 audit.py --config project-audit.json
+ ```
+ 
+-### CLI Options
++## CLI options
+ 
+-| Option         | Default     | Description                                  |
+-|---------------|-------------|----------------------------------------------|
+-| `--path`      | (required)  | Path to Adobe Commerce project root          |
+-| `--name`      | dir name    | Project name for the report title            |
+-| `--output`    | `output/`   | Output directory for the Excel report        |
+-| `--namespace` | `Custom`    | Custom module namespace to scan              |
++| Option | Description |
++|---|---|
++| `--config` | Path to config JSON. Defaults to `config.json`. |
++| `--path` | Adobe Commerce project root. Overrides `project.path`. |
++| `--db` | SQL dump path. Overrides `database.dump_path`. Invalid CLI-provided DB path is treated as an error. Invalid config-only DB path is skipped with a warning. |
++| `--name` | Project/report name. |
++| `--output` | Output directory. |
++| `--namespace` | Custom namespace hint. |
++| `--module` | Optional targeted filter for re-runs only. Leave empty for the main audit so all modules are covered. |
+ 
+-## Project Structure
++## Module-by-module remediation planning
+ 
+-```
+-adobe-commerce-audit/
+-├── audit.py              # CLI entry point
+-├── lib/
+-│   ├── __init__.py       # Package metadata (version)
+-│   ├── scanner.py        # AdobeCommerceAuditScanner — 27 scan methods
+-│   ├── report.py         # AuditReportGenerator — Excel report + charts
+-│   └── styles.py         # Excel styles, colors, formatting helpers
+-├── output/               # Generated reports (gitignored)
+-├── requirements.txt
+-├── .gitignore
+-└── README.md
+-```
++Run the main audit against the **entire Adobe Commerce project**. Do not split the audit by module, because cross-module plugins, observers, preferences, layout updates, shared services, WebAPI routes, queues, cron jobs, and database changes can create hidden dependencies.
++
++Use the generated **Module Rollout Summary** and **Module Execution Plan** sheets to plan fixes and deployments module by module. Optional `--module` runs should be used only after the full audit, for targeted re-validation of a module or release batch.
++
++Recommended rollout order:
++
++1. Security, admin/API ACL, webhooks, payment callbacks, and secrets.
++2. Checkout, quote, payment, order, invoice, shipment, credit memo, and refund flows.
++3. Inventory/MSI, source selection, salable qty, reservations, and ERP integrations.
++4. DB schema/indexes, performance, caching/FPC/private content, queues, and cron.
++5. Code structure, coding standards, tests, frontend assets, and documentation.
+ 
+ ## Output
+ 
+-The tool generates a timestamped `.xlsx` file (e.g., `MyProject-code-audit-20250101_120000.xlsx`) with ~30 sheets:
++The generated Excel workbook contains:
+ 
+-1. **Executive Summary** — severity breakdown, category breakdown, top risk modules
+-2. **27 category sheets** — detailed findings with module, file, line, code context, severity, recommendation
+-3. **Recommendations** — 60+ actionable items with area color-coding, effort, priority
+-4. **Action Plan** — P0–P4 prioritized items mapped to sprints
+-5. **Charts** — severity pie, top modules bar, category stacked bar
++- Executive Summary
++- Per-category finding sheets
++- Expert Validation & Recommendation column on every detail sheet
++- Recommendations
++- Action Plan
++- Module Rollout Summary
++- Module Execution Plan
++- Charts
+ 
+-## License
++## Notes
+ 
+-MIT
+-# adobe-commerce-audit
++Static analysis can identify risky patterns and probable edge cases, but critical business findings must be validated against runtime behavior, store configuration, third-party modules, integrations, and production-like data. Treat generated recommendations as a review accelerator, not as a replacement for architecture review and regression testing.
+diff --git a/audit.py b/audit.py
+index 49788b7..ca04f9c 100644
+--- a/audit.py
++++ b/audit.py
+@@ -3,7 +3,7 @@
+ Adobe Commerce Code Audit Tool v3.0
+ =====================================
+ Enterprise-grade static code analysis for Adobe Commerce (Magento 2) projects.
+-Scans 28 categories and generates an Excel report with charts.
++Scans all configured categories and generates an Excel report with charts and module-wise remediation planning.
+ Supports optional DB dump analysis for full database audit.
+ 
+ Usage:
+@@ -62,6 +62,7 @@ Examples:
+     parser.add_argument("--name", default=None, help="Project name (overrides config)")
+     parser.add_argument("--output", default=None, help="Output directory (overrides config)")
+     parser.add_argument("--namespace", default=None, help="Custom module namespace (overrides config)")
++    parser.add_argument("--module", default=None, help="Optional targeted re-run filter. Leave empty for the main full-project audit.")
+     args = parser.parse_args()
+ 
+     # Load config file
+@@ -94,13 +95,21 @@ Examples:
+     if db_path:
+         db_path = os.path.abspath(db_path)
+         if not os.path.isfile(db_path):
+-            print(f"❌ Error: DB dump file does not exist: {db_path}")
+-            sys.exit(1)
++            if args.db:
++                print(f"❌ Error: DB dump file does not exist: {db_path}")
++                sys.exit(1)
++            print(f"⚠️  Warning: Configured DB dump does not exist, DB audit will be skipped: {db_path}")
++            db_path = None
+ 
+     project_name = args.name or project_cfg.get("name") or (os.path.basename(project_path) if project_path else "DB-Audit")
+     output_dir = os.path.abspath(args.output or output_cfg.get("directory", "output"))
+     namespace = args.namespace or scanner_cfg.get("namespace", "Custom")
+     categories = scanner_cfg.get("categories", None)  # None = all categories
++    module_filter = args.module or scanner_cfg.get("modules")
++    if isinstance(module_filter, str):
++        modules = [m.strip() for m in module_filter.split(",") if m.strip()]
++    else:
++        modules = list(module_filter or [])
+ 
+     os.makedirs(output_dir, exist_ok=True)
+ 
+@@ -143,6 +152,9 @@ Examples:
+         print(f"   Git Branch: {branch}")
+     if categories:
+         print(f"   Categories: {len(categories)} selected")
++    if modules:
++        print(f"   Modules: {', '.join(modules)}")
++        print("   ⚠️  Partial scan mode: use this only for targeted re-runs. Main audit should leave modules empty to cover all modules.")
+     if thresholds:
+         print(f"   Thresholds: {len(thresholds)} custom values")
+     print()
+@@ -154,6 +166,7 @@ Examples:
+         thresholds=thresholds,
+         categories=categories,
+         db_dump_path=db_path,
++        modules=modules,
+     )
+     findings = scanner.scan()
+ 
+diff --git a/lib/expert.py b/lib/expert.py
+index 827a8a1..0c4a59c 100644
+--- a/lib/expert.py
++++ b/lib/expert.py
+@@ -204,6 +204,25 @@ TEMPLATES = {
+         "Add focused unit/integration/API tests for the corrected behavior and one "
+         "regression test for the failure mode; gate high-risk fixes in CI."
+     ),
++    "business_flow_integrity": (
++        "Validate the customization against Adobe Commerce service-layer flow, entity "
++        "state machines, events, indexes, emails, and rollback behavior. Add integration "
++        "tests for checkout/order/customer side effects and retry/idempotency."
++    ),
++    "critical_callback_security": (
++        "Verify authentication/signature, replay protection, idempotency keys, row locking, "
++        "and duplicate/out-of-order handling before changing payment, shipment, refund, or "
++        "inventory state."
++    ),
++    "msi_inventory_api": (
++        "Use MSI service contracts/reservation/source-item APIs instead of legacy stock table "
++        "writes. Test multi-source, salable qty, backorders, cancellations, refunds, and shipment "
++        "deduction behavior."
++    ),
++    "admin_api_least_privilege": (
++        "Apply least-privilege ACL, ownership validation, CSRF/form-key or signed request checks, "
++        "and negative API/admin tests for anonymous, wrong customer, and low-privilege admin access."
++    ),
+ }
+ 
+ 
+@@ -409,6 +428,33 @@ CATEGORY_RULES = {
+             ("REST API", "acl_least_privilege", None),
+         ],
+     },
++    "Business Customization Review": {
++        "default": "business_flow_integrity",
++        "overrides": [
++            ("Direct Order/Entity State", "business_flow_integrity", "correct_stronger"),
++            ("Direct Save", "business_flow_integrity", "correct_stronger"),
++            ("Synchronous External API", "critical_callback_security", None),
++            ("Hardcoded Business Rule", "validate_general", None),
++        ],
++    },
++    "Critical Commerce Flows": {
++        "default": "business_flow_integrity",
++        "overrides": [
++            ("Webhook/Callback", "critical_callback_security", "correct_stronger"),
++            ("Around Plugin", "plugin_ordering", None),
++            ("collectTotals", "cache_profiling", None),
++        ],
++    },
++    "MSI Inventory & Source Management": {
++        "default": "msi_inventory_api",
++    },
++    "Admin & Integration Security": {
++        "default": "admin_api_least_privilege",
++        "overrides": [
++            ("Inbound Integration", "critical_callback_security", "correct_stronger"),
++            ("Broad WebAPI ACL", "admin_api_least_privilege", "correct_stronger"),
++        ],
++    },
+     "Logical Flow & Cross-Module": {
+         "default": "service_contracts",
+         "overrides": [
+diff --git a/lib/report.py b/lib/report.py
+index 125882d..cd5a736 100644
+--- a/lib/report.py
++++ b/lib/report.py
+@@ -14,6 +14,12 @@ from openpyxl.utils import get_column_letter
+ from collections import Counter, defaultdict
+ from datetime import datetime
+ 
++try:
++    from lib.expert import get_expert_recommendation
++except Exception:  # pragma: no cover - report should still work if expert engine is unavailable
++    def get_expert_recommendation(category, issue_type, severity="MEDIUM", effort="Medium"):
++        return "Validate finding against execution path, confirm Adobe Commerce compatibility, add targeted tests, and roll out safely."
++
+ from lib.styles import (
+     TITLE_FONT, SUBTITLE_FONT, HEADER_FONT, HEADER_FILL, HEADER_BORDER,
+     SUMMARY_LABEL_FONT, SUMMARY_VALUE_FONT, BODY_FONT, BODY_FONT_BOLD,
+@@ -49,7 +55,9 @@ class AuditReportGenerator:
+             "XML Configuration", "WebAPI & ACL", "DB Schema",
+             "Infrastructure", "Cloud Deployment", "PHP Deep Analysis",
+             "Event Observers", "Module Architecture", "Code Metrics",
+-            "Business Logic Identification", "Logical Flow & Cross-Module",
++            "Business Logic Identification", "Business Customization Review",
++            "Critical Commerce Flows", "MSI Inventory & Source Management",
++            "Admin & Integration Security", "Logical Flow & Cross-Module",
+             # DB dump analysis categories
+             "DB: Table Structure", "DB: Index Analysis", "DB: Column Analysis",
+             "DB: Foreign Keys", "DB: Naming Conventions", "DB: Storage Engine",
+@@ -62,6 +70,7 @@ class AuditReportGenerator:
+ 
+         self._sheet_recommendations()
+         self._sheet_action_plan()
++        self._sheet_module_rollout_summary()
+         self._sheet_module_plan()
+         self._sheet_charts()
+ 
+@@ -392,17 +401,17 @@ class AuditReportGenerator:
+         crit_cnt = sum(1 for x in sevs if x == "CRITICAL")
+         high_cnt = sum(1 for x in sevs if x == "HIGH")
+         banner = f"{category}  —  {len(items)} findings  |  {crit_cnt} Critical  |  {high_cnt} High"
+-        ws.merge_cells('A1:J1')
++        ws.merge_cells('A1:K1')
+         b_cell = ws.cell(row=1, column=1, value=banner)
+         b_cell.font = Font(name='Calibri', bold=True, size=12, color='FFFFFF')
+         b_cell.fill = PatternFill(start_color=tab_color, end_color=tab_color, fill_type='solid')
+         b_cell.alignment = Alignment(horizontal='left', vertical='center')
+         ws.row_dimensions[1].height = 30
+-        for c in range(1, 11):
++        for c in range(1, 12):
+             ws.cell(row=1, column=c).fill = PatternFill(start_color=tab_color, end_color=tab_color, fill_type='solid')
+ 
+         # --- Header row ---
+-        headers = ["#", "Module", "File Path", "Line #", "Issue Type", "Description", "Code Context", "Severity", "Recommendation", "Effort"]
++        headers = ["#", "Module", "File Path", "Line #", "Issue Type", "Description", "Code Context", "Severity", "Recommendation", "Expert Validation & Recommendation", "Effort"]
+         for c, h in enumerate(headers, 1):
+             cell = ws.cell(row=2, column=c, value=h)
+             cell.font = HEADER_FONT
+@@ -411,7 +420,7 @@ class AuditReportGenerator:
+             cell.border = HEADER_BORDER
+         ws.row_dimensions[2].height = 28
+         ws.freeze_panes = 'A3'
+-        ws.auto_filter.ref = f"A2:J2"
++        ws.auto_filter.ref = f"A2:K2"
+ 
+         # --- Data rows ---
+         for idx, item in enumerate(items, 1):
+@@ -427,7 +436,8 @@ class AuditReportGenerator:
+             code_cell.font = CODE_FONT
+             ws.cell(row=r, column=8, value=item["severity"])
+             ws.cell(row=r, column=9, value=item["recommendation"])
+-            ws.cell(row=r, column=10, value=item["effort"])
++            ws.cell(row=r, column=10, value=get_expert_recommendation(category, item["type"], item["severity"], item.get("effort", "Medium")))
++            ws.cell(row=r, column=11, value=item["effort"])
+ 
+         mr = len(items) + 2
+         color_severity_col(ws, 8, mr)
+@@ -435,9 +445,9 @@ class AuditReportGenerator:
+ 
+         # Style effort column as centered
+         for r in range(3, mr + 1):
+-            ws.cell(row=r, column=10).alignment = CENTER_TOP
++            ws.cell(row=r, column=11).alignment = CENTER_TOP
+ 
+-        widths = [6, 28, 55, 8, 28, 60, 55, 12, 65, 10]
++        widths = [6, 28, 55, 8, 28, 60, 55, 12, 65, 75, 10]
+         for i, w in enumerate(widths, 1):
+             ws.column_dimensions[get_column_letter(i)].width = w
+ 
+@@ -730,6 +740,131 @@ class AuditReportGenerator:
+         for i, w in enumerate(widths, 1):
+             ws.column_dimensions[get_column_letter(i)].width = w
+ 
++
++    # ---------- Module Rollout Summary ----------
++
++    def _module_domain(self, module_name):
++        """Return a Commerce business/technical domain for rollout grouping."""
++        m = (module_name or "").lower()
++        if any(x in m for x in ["payment", "pay", "razor", "stripe", "paypal", "cashfree", "refund", "invoice", "creditmemo"]):
++            return "Payment / Invoice / Refund"
++        if any(x in m for x in ["checkout", "quote", "cart", "coupon", "promo", "salesrule", "shipping", "address", "tax"]):
++            return "Checkout / Quote / Shipping / Tax"
++        if any(x in m for x in ["sales", "order", "shipment", "rma", "return"]):
++            return "Order / Fulfilment"
++        if any(x in m for x in ["inventory", "msi", "stock", "source", "warehouse", "erp", "sap", "wms"]):
++            return "Inventory / MSI / ERP"
++        if any(x in m for x in ["customer", "login", "otp", "account", "loyalty", "reward", "wallet"]):
++            return "Customer / Identity / Loyalty"
++        if any(x in m for x in ["catalog", "product", "category", "search", "elastic", "opensearch", "price", "pricing"]):
++            return "Catalog / Search / Pricing"
++        if any(x in m for x in ["admin", "acl", "api", "graphql", "webapi", "integration", "webhook"]):
++            return "Admin / API / Integration"
++        if any(x in m for x in ["theme", "frontend", "widget", "banner", "cms", "pagebuilder", "ui"]):
++            return "Frontend / CMS / Theme"
++        if any(x in m for x in ["cron", "queue", "message", "cache", "redis", "varnish", "cloud", "deploy", "logger", "log"]):
++            return "Platform / Infra / Operations"
++        return "Core / Shared / Other"
++
++    def _rollout_wave(self, domain, crit, high, med, total):
++        """Recommend a safe remediation wave for production rollout planning."""
++        if crit > 0 and domain in ["Payment / Invoice / Refund", "Checkout / Quote / Shipping / Tax", "Admin / API / Integration"]:
++            return "Wave 0 - Security / Revenue Critical"
++        if crit > 0:
++            return "Wave 1 - Critical Stabilization"
++        if high > 0 and domain in ["Payment / Invoice / Refund", "Checkout / Quote / Shipping / Tax", "Order / Fulfilment", "Inventory / MSI / ERP"]:
++            return "Wave 2 - Business Flow Hardening"
++        if high > 0:
++            return "Wave 3 - Technical Risk Reduction"
++        if med > 0:
++            return "Wave 4 - Maintainability / Performance"
++        return "Wave 5 - Low Risk Cleanup"
++
++    def _deployment_caution(self, domain, crit, high):
++        if domain == "Payment / Invoice / Refund":
++            return "Deploy separately with payment sandbox validation, webhook replay tests, refund/invoice regression, and rollback plan."
++        if domain == "Checkout / Quote / Shipping / Tax":
++            return "Deploy with checkout/cart regression, coupon/tax/shipping matrix, cache warmup, and order placement smoke tests."
++        if domain == "Order / Fulfilment":
++            return "Validate order state transitions, invoice/shipment/credit memo lifecycle, emails, ERP sync, and admin operations."
++        if domain == "Inventory / MSI / ERP":
++            return "Validate salable qty, reservations, source deduction, cancellations, refunds, backorders, and ERP reconciliation."
++        if domain == "Admin / API / Integration":
++            return "Validate ACL, tokens, API contracts, callback signatures, rate limiting, and integration negative scenarios."
++        if domain == "Catalog / Search / Pricing":
++            return "Validate reindexing, price rules, search relevance, category/product cache tags, and product detail/category pages."
++        if domain == "Frontend / CMS / Theme":
++            return "Validate FPC behavior, private content, CSP, JS bundling, checkout impact, and key responsive journeys."
++        if domain == "Platform / Infra / Operations":
++            return "Coordinate with deployment window; validate cron/queue/cache/Redis/Varnish/OpenSearch and monitoring dashboards."
++        if crit or high:
++            return "Deploy in a controlled release with targeted functional, integration, and rollback validation."
++        return "Can be batched with similar low-risk modules after automated tests pass."
++
++    def _sheet_module_rollout_summary(self):
++        """Create a concise module-by-module remediation/deployment planning sheet.
++
++        The audit itself is expected to scan the complete project. This sheet is
++        for planning fixes and production rollout in safe module/domain waves.
++        """
++        ws = self.wb.create_sheet("Module Rollout Summary")
++        ws.sheet_properties.tabColor = "8064A2"
++
++        headers = [
++            "Wave", "Module", "Domain", "Total", "Critical", "High", "Medium", "Low", "Info",
++            "Risk Score", "Deployment / Validation Recommendation"
++        ]
++        for c, h in enumerate(headers, 1):
++            ws.cell(row=1, column=c, value=h)
++        style_header_row(ws, len(headers))
++        ws.freeze_panes = 'A2'
++        ws.auto_filter.ref = "A1:K1"
++
++        sev_weight = {"CRITICAL": 10000, "HIGH": 1000, "MEDIUM": 100, "LOW": 10, "INFO": 1}
++        modules = defaultdict(list)
++        for cat, items in self.findings.items():
++            for item in items:
++                modules[item.get("module", "Unknown")].append(item)
++
++        rows = []
++        for mod, items in modules.items():
++            counts = Counter(i.get("severity", "INFO") for i in items)
++            crit = counts.get("CRITICAL", 0)
++            high = counts.get("HIGH", 0)
++            med = counts.get("MEDIUM", 0)
++            low = counts.get("LOW", 0)
++            info = counts.get("INFO", 0)
++            total = len(items)
++            score = sum(sev_weight.get(i.get("severity", "INFO"), 1) for i in items)
++            domain = self._module_domain(mod)
++            wave = self._rollout_wave(domain, crit, high, med, total)
++            caution = self._deployment_caution(domain, crit, high)
++            rows.append([wave, mod, domain, total, crit, high, med, low, info, score, caution])
++
++        wave_order = {
++            "Wave 0 - Security / Revenue Critical": 0,
++            "Wave 1 - Critical Stabilization": 1,
++            "Wave 2 - Business Flow Hardening": 2,
++            "Wave 3 - Technical Risk Reduction": 3,
++            "Wave 4 - Maintainability / Performance": 4,
++            "Wave 5 - Low Risk Cleanup": 5,
++        }
++        rows.sort(key=lambda r: (wave_order.get(r[0], 99), -r[9], r[1]))
++
++        for r, row in enumerate(rows, 2):
++            for c, val in enumerate(row, 1):
++                ws.cell(row=r, column=c, value=val)
++
++        mr = max(1, len(rows) + 1)
++        color_priority_col(ws, 1, mr)
++        apply_zebra_and_borders(ws, mr, len(headers), data_start=2)
++        for r in range(2, mr + 1):
++            for c in [4, 5, 6, 7, 8, 9, 10]:
++                ws.cell(row=r, column=c).alignment = CENTER_TOP
++        widths = [34, 32, 32, 10, 10, 10, 10, 10, 10, 12, 90]
++        for i, w in enumerate(widths, 1):
++            ws.column_dimensions[get_column_letter(i)].width = w
++
+     # ---------- Module Execution Plan ----------
+ 
+     def _sheet_module_plan(self):
+diff --git a/lib/scanner.py b/lib/scanner.py
+index fafcd25..733d7f6 100644
+--- a/lib/scanner.py
++++ b/lib/scanner.py
+@@ -1,7 +1,7 @@
+ """
+ Adobe Commerce Code Audit Scanner Engine
+ =========================================
+-Dynamically scans an Adobe Commerce (Magento 2) codebase for 27 audit categories.
++Dynamically scans an Adobe Commerce (Magento 2) codebase for 40+ audit categories.
+ Each scan method finds issues and adds findings with severity, line numbers,
+ code context, and recommendations.
+ """
+@@ -13,7 +13,7 @@ from collections import defaultdict, Counter
+ 
+ 
+ class AdobeCommerceAuditScanner:
+-    """Dynamically scans an Adobe Commerce codebase for 28 audit categories + DB analysis."""
++    """Dynamically scans an Adobe Commerce codebase for 40+ audit categories + DB analysis."""
+ 
+     # Default thresholds — overridable via config.json
+     DEFAULT_THRESHOLDS = {
+@@ -26,7 +26,7 @@ class AdobeCommerceAuditScanner:
+         "max_methods_per_class": 20,
+     }
+ 
+-    def __init__(self, project_root=None, namespace="Custom", thresholds=None, categories=None, db_dump_path=None):
++    def __init__(self, project_root=None, namespace="Custom", thresholds=None, categories=None, db_dump_path=None, modules=None):
+         self.root = os.path.abspath(project_root) if project_root else None
+         self.namespace = namespace
+         self.app_code = os.path.join(self.root, "app", "code") if self.root else None
+@@ -36,6 +36,7 @@ class AdobeCommerceAuditScanner:
+         self.thresholds = {**self.DEFAULT_THRESHOLDS, **(thresholds or {})}
+         self._enabled_categories = set(categories) if categories else None  # None = all
+         self.db_dump_path = db_dump_path
++        self._selected_modules = set(modules or [])  # module names like Vendor_Module; None/empty = all
+ 
+     # ---------- file helpers ----------
+ 
+@@ -71,6 +72,12 @@ class AdobeCommerceAuditScanner:
+             return f"{parts[2]}_{parts[3]}"
+         return "Unknown"
+ 
++    def _filter_selected_modules(self, files):
++        """Restrict scan input to selected modules when --module/scanner.modules is used."""
++        if not self._selected_modules:
++            return files
++        return [fp for fp in files if self._module(fp) in self._selected_modules]
++
+     def _read(self, fp):
+         if fp not in self._php_cache:
+             try:
+@@ -135,9 +142,11 @@ class AdobeCommerceAuditScanner:
+ 
+         # --- Code scan (only if project path provided) ---
+         if self.root and self.app_code:
+-            php = self._php_files()
+-            xml = self._xml_files()
+-            phtml = self._phtml_files()
++            php = self._filter_selected_modules(self._php_files())
++            xml = self._filter_selected_modules(self._xml_files())
++            phtml = self._filter_selected_modules(self._phtml_files())
++            if self._selected_modules:
++                print(f"   Module filter: {', '.join(sorted(self._selected_modules))}")
+             print(f"   Files: {len(php)} PHP, {len(xml)} XML, {len(phtml)} PHTML\n")
+ 
+             code_scanners = [
+@@ -169,6 +178,10 @@ class AdobeCommerceAuditScanner:
+                 ("Module Architecture",   self._scan_module_arch),
+                 ("Code Metrics",          self._scan_code_metrics),
+                 ("Business Logic Identification", self._scan_business_logic),
++                ("Business Customization Review", self._scan_business_customizations),
++                ("Critical Commerce Flows", self._scan_critical_commerce_flows),
++                ("MSI Inventory & Source Management", self._scan_msi_inventory),
++                ("Admin & Integration Security", self._scan_admin_integration_security),
+                 ("Logical Flow & Cross-Module", self._scan_logical_flow),
+                 ("Coding Standards",      self._scan_coding_standards),
+                 ("Input Validation & XSS", self._scan_input_validation),
+@@ -2478,6 +2491,205 @@ class AdobeCommerceAuditScanner:
+ 
+     # ==================== LOGICAL FLOW & CROSS-MODULE ANALYSIS ====================
+ 
++    # ==================== BUSINESS CUSTOMIZATION DEEP REVIEW ====================
++
++    def _scan_business_customizations(self, php, xml, phtml):
++        """Deep review of business customizations that directly affect revenue, order state, and customer experience."""
++        CAT = "Business Customization Review"
++        critical_terms = re.compile(
++            r'(quote|cart|checkout|order|invoice|shipment|creditmemo|refund|payment|capture|authorize|'
++            r'cancel|hold|unhold|coupon|discount|reward|gift|storecredit|customer|address|tax|shipping|inventory|stock)',
++            re.IGNORECASE,
++        )
++
++        for f in php:
++            mod = self._module(f)
++            content = self._read(f)
++            if not content:
++                continue
++            lower_path = f.replace('\\', '/').lower()
++
++            # Direct state/status mutation in high-risk flows.
++            for hit in self._grep(f, r'->set(State|Status)\s*\('):
++                context = self._context(f, hit[0])
++                if critical_terms.search(context + " " + lower_path):
++                    self._add(CAT, mod, f, hit[0],
++                        "Direct Order/Entity State Mutation",
++                        "Business flow appears to set state/status directly. Direct mutations can bypass Adobe Commerce state machines, payment review, invoice/shipment lifecycle, and notification/indexer side effects.",
++                        context, "CRITICAL",
++                        "Validate whether this is changing order/payment/invoice/shipment/customer state. Prefer service-layer APIs such as order management, payment commands, invoice/shipment services, or explicit domain services. Add integration tests for happy path, failure path, retry/idempotency, email/event side effects, and status history.",
++                        "High")
++
++            # Direct order save bypassing repositories/services.
++            for hit in self._grep(f, r'->save\s*\(\s*\$?(order|quote|invoice|shipment|creditmemo|payment|customer)', re.IGNORECASE):
++                self._add(CAT, mod, f, hit[0],
++                    "Direct Save on Critical Business Entity",
++                    "Critical commerce entity appears to be persisted directly, which can bypass service contracts, extension attributes, indexers, events, and transaction boundaries.",
++                    self._context(f, hit[0]), "HIGH",
++                    "Use the appropriate repository/service/management interface and wrap multi-entity writes in a transaction. Verify observers/plugins still run as expected and add regression tests for order placement, cancellation, refunds, shipments, customer save, and quote-to-order conversion.",
++                    "Medium")
++
++            # Business conditionals tightly coupled to static IDs/SKUs/store/customer groups.
++            for hit in self._grep(f, r'(getSku\s*\(\)|customer_group_id|getCustomerGroupId\s*\(\)|getStoreId\s*\(\)|website_id|store_id).*?(==|!=|===|!==|in_array)'):
++                self._add(CAT, mod, f, hit[0],
++                    "Hardcoded Business Rule Condition",
++                    "Business behavior appears tied to hardcoded SKU/store/website/customer group conditions. These rules are fragile during catalog, store, and B2B changes.",
++                    self._context(f, hit[0]), "MEDIUM",
++                    "Move business rules into admin configuration, SalesRule/CatalogRule/customer segment configuration, or a documented domain service with scoped config. Add tests for each store/website/customer group and document the owning business process.",
++                    "Medium")
++
++            # External APIs in synchronous checkout/order/payment hot paths.
++            if critical_terms.search(lower_path) or re.search(r'class\s+.*(Checkout|Order|Payment|Shipping|Inventory|Customer)', content):
++                if re.search(r'(curl_exec|ClientInterface|GuzzleHttp|Zend\\Http|Laminas\\Http|file_get_contents\s*\(\s*[\'\"]https?://)', content):
++                    self._add(CAT, mod, f, 1,
++                        "Synchronous External API in Critical Flow",
++                        "Critical business flow appears to call an external service synchronously. Latency, timeout, or provider errors can directly block checkout/order/customer operations.",
++                        self._context(f, 1), "HIGH",
++                        "Set strict timeouts, circuit-breaker behavior, sanitized structured logging, and explicit fallback rules. For non-blocking work, move to message queues. For mandatory calls, make retry/idempotency keys explicit and add integration tests for timeout, 4xx, 5xx, duplicate callback, and partial failure.",
++                        "High")
++
++            # Event dispatch without clear data object in critical flows.
++            for hit in self._grep(f, r'eventManager->dispatch\s*\(\s*[\'\"]([^\'\"]+)[\'\"]'):
++                event_name = hit[2].group(1)
++                if critical_terms.search(event_name + " " + lower_path):
++                    self._add(CAT, mod, f, hit[0],
++                        f"Critical Business Event Contract: {event_name}",
++                        "A custom/critical event is dispatched in a business flow. Event payloads are implicit contracts that can silently break dependent modules.",
++                        self._context(f, hit[0]), "INFO",
++                        "Document event timing, payload keys, mutability expectations, and rollback behavior. Add module sequence dependencies where observers require dispatcher classes and integration tests that prove downstream observers still receive expected payloads.",
++                        "Low")
++
++    def _scan_critical_commerce_flows(self, php, xml, phtml):
++        """Find risky patterns around checkout, payment, order, refund, and customer flows."""
++        CAT = "Critical Commerce Flows"
++        for f in php:
++            mod = self._module(f)
++            content = self._read(f)
++            if not content:
++                continue
++            path = f.replace('\\', '/')
++            lower = path.lower()
++
++            # Around plugins on core checkout/order/payment save flows are high blast radius.
++            if 'Plugin' in path and re.search(r'function\s+around(?:Place|Save|Execute|Collect|Capture|Refund|Cancel|Submit|Import|Validate)', content):
++                self._add(CAT, mod, f, 1,
++                    "Around Plugin on Critical Commerce Flow",
++                    "Around plugin detected on a method name commonly used in checkout/order/payment/shipping/customer flows. Around plugins can skip original execution or change return semantics.",
++                    self._context(f, 1), "HIGH",
++                    "Prefer before/after plugins or service composition where possible. If around is unavoidable, always call proceed exactly once unless explicitly blocking, preserve return type, handle exceptions safely, and add integration tests around the complete checkout/order/payment flow.",
++                    "Medium")
++
++            # Quote/order totals and collectTotals recursion/performance risk.
++            for hit in self._grep(f, r'collectTotals\s*\('):
++                severity = "HIGH" if any(token in lower for token in ['/checkout/', '/quote/', '/order/', '/observer/', '/plugin/']) else "MEDIUM"
++                self._add(CAT, mod, f, hit[0],
++                    "collectTotals Usage in Business Flow",
++                    "collectTotals is expensive and can trigger totals collectors, promotions, shipping/tax recalculation, and plugin chains. Incorrect use can create checkout slowness or inconsistent quote totals.",
++                    self._context(f, hit[0]), severity,
++                    "Call collectTotals only at well-defined quote mutation boundaries, avoid loops/observers that can recurse, and profile with production-like cart sizes. Add tests for coupons, tax, shipping, multi-address, bundle/configurable products, and currency/store scope.",
++                    "Medium")
++
++            # Email/notification inside transactions or critical logic.
++            if re.search(r'(TransportBuilder|SenderBuilder|sendMessage\s*\(|send\s*\()', content) and re.search(r'(beginTransaction|order|invoice|shipment|creditmemo|payment)', content, re.IGNORECASE):
++                self._add(CAT, mod, f, 1,
++                    "Notification Coupled to Transactional Flow",
++                    "Email/notification logic appears coupled with order/payment/invoice/shipment processing. Failures can block business state changes or cause duplicate notifications on retry.",
++                    self._context(f, 1), "MEDIUM",
++                    "Move notification dispatch after successful persistence or to an async queue. Ensure idempotency, template scope, store identity, and suppression rules are explicit. Test retries to avoid duplicate emails/SMS/webhooks.",
++                    "Medium")
++
++            # Non-idempotent callbacks/webhooks.
++            if re.search(r'(webhook|callback|ipn|notification|response|gateway)', lower) and re.search(r'function\s+execute\s*\(', content):
++                if not re.search(r'(idempot|unique|transaction_id|txn_id|increment_id|already|duplicate)', content, re.IGNORECASE):
++                    self._add(CAT, mod, f, 1,
++                        "Webhook/Callback Without Visible Idempotency Guard",
++                        "Inbound payment/shipping/integration callback does not show an obvious idempotency or duplicate-event guard. Duplicate callbacks can double-capture, double-refund, or overwrite order state.",
++                        self._context(f, 1), "CRITICAL",
++                        "Persist external event IDs/transaction IDs with a unique constraint, reject or no-op duplicates, verify signatures, and lock affected order/payment rows during state transitions. Test duplicate, out-of-order, replayed, and delayed callback scenarios.",
++                        "High")
++
++    def _scan_msi_inventory(self, php, xml, phtml):
++        """Review Multi-Source Inventory and stock reservation customizations."""
++        CAT = "MSI Inventory & Source Management"
++        for f in php:
++            mod = self._module(f)
++            content = self._read(f)
++            if not content:
++                continue
++            path = f.replace('\\', '/')
++            inventory_related = re.search(r'(Inventory|Source|Stock|Salable|Reservation|Shipment|Backorder)', path + " " + content, re.IGNORECASE)
++            if not inventory_related:
++                continue
++
++            for hit in self._grep(f, r'(cataloginventory_stock_item|cataloginventory_stock_status|inventory_reservation|inventory_source_item)'):
++                self._add(CAT, mod, f, hit[0],
++                    "Direct Inventory Table Access",
++                    "Inventory/stock tables are accessed directly. In MSI, salable quantity, reservations, and source items are service-driven and direct writes/read assumptions can be wrong.",
++                    self._context(f, hit[0]), "HIGH",
++                    "Use MSI service contracts such as GetProductSalableQtyInterface, SourceItemsSaveInterface, reservations APIs, or stock resolver services. Validate single-source vs multi-source behavior, backorders, partial shipments, refunds, source selection, and reindex impact.",
++                    "Medium")
++
++            if re.search(r'(setQty|setIsInStock|setStockData|saveStock)', content) and 'SourceItemsSaveInterface' not in content:
++                self._add(CAT, mod, f, 1,
++                    "Legacy Stock Mutation Pattern",
++                    "Stock quantity/status appears to be mutated with legacy catalog inventory patterns instead of MSI source item/reservation services.",
++                    self._context(f, 1), "HIGH",
++                    "For Adobe Commerce 2.4.x, update source items or reservations through MSI APIs, not legacy stock item saves. Add tests for source-specific qty, salable qty, website stock mapping, cancellations/refunds, and async order placement.",
++                    "High")
++
++            if re.search(r'(isSaleable|getSalableQty|backorder|reservation)', content, re.IGNORECASE) and re.search(r'(quote|cart|checkout|order)', content, re.IGNORECASE):
++                self._add(CAT, mod, f, 1,
++                    "Inventory Check in Checkout/Order Flow",
++                    "Inventory availability logic appears inside checkout/order flow. Incorrect assumptions can oversell, block valid orders, or ignore reservations/backorders.",
++                    self._context(f, 1), "MEDIUM",
++                    "Validate with MSI stock resolver and salable qty APIs. Cover simple/configurable/bundle products, backorders, multiple websites/stocks, reservations after order placement, cancellation, refund, and shipment source deduction.",
++                    "Medium")
++
++    def _scan_admin_integration_security(self, php, xml, phtml):
++        """Review admin routes, integrations, webhooks, and tokens with a business-impact/security lens."""
++        CAT = "Admin & Integration Security"
++        for f in xml:
++            mod = self._module(f)
++            content = self._read(f)
++            if not content:
++                continue
++            if f.endswith('webapi.xml'):
++                for m in re.finditer(r'<route\s+[^>]*url="([^"]+)"[^>]*>.*?<resource\s+ref="([^"]+)"', content, re.DOTALL):
++                    route_url, resource = m.group(1), m.group(2)
++                    line = self._line_of(content, m.start())
++                    if resource in ('anonymous', 'Magento_Customer::customer') and re.search(r'(order|payment|invoice|shipment|refund|customer|cart|quote|inventory|stock)', route_url, re.IGNORECASE):
++                        self._add(CAT, mod, f, line,
++                            f"Broad WebAPI ACL on Critical Route: {route_url}",
++                            f"Critical WebAPI route uses broad resource '{resource}'. This may expose business operations or customer data beyond intended roles.",
++                            self._context(f, line), "CRITICAL" if resource == 'anonymous' else "HIGH",
++                            "Restrict to least-privilege ACL resources, require customer/admin auth as appropriate, validate ownership of entity IDs, and add negative API tests for anonymous, wrong customer, low-privilege admin, and expired/inactive tokens.",
++                            "Medium")
++
++        for f in php:
++            mod = self._module(f)
++            content = self._read(f)
++            if not content:
++                continue
++            path = f.replace('\\', '/')
++            # Admin controllers without explicit ADMIN_RESOURCE or _isAllowed.
++            if '/Controller/Adminhtml/' in path and 'ADMIN_RESOURCE' not in content and 'function _isAllowed' not in content:
++                self._add(CAT, mod, f, 1,
++                    "Admin Controller Missing Explicit ACL",
++                    "Adminhtml controller has no visible ADMIN_RESOURCE or _isAllowed guard. It may inherit overly broad access or become inaccessible/unpredictable.",
++                    self._context(f, 1), "HIGH",
++                    "Define a least-privilege ADMIN_RESOURCE constant and matching acl.xml resource. Add tests for allowed and denied admin roles, including POST/state-changing actions with valid/invalid form keys.",
++                    "Low")
++
++            # Signature verification for inbound integrations/webhooks.
++            if re.search(r'(webhook|callback|ipn|notification)', path, re.IGNORECASE) and re.search(r'function\s+execute\s*\(', content):
++                if not re.search(r'(hash_hmac|signature|hmac|openssl_verify|verify.*sign|X-Signature|Authorization)', content, re.IGNORECASE):
++                    self._add(CAT, mod, f, 1,
++                        "Inbound Integration Missing Signature Verification",
++                        "Webhook/callback controller does not show obvious signature/auth verification. Attackers could spoof payment/shipping/ERP callbacks.",
++                        self._context(f, 1), "CRITICAL",
++                        "Verify HMAC/signature/timestamp/nonce before processing, reject replayed requests, store audit logs with masked payloads, and add negative tests for invalid signature, expired timestamp, wrong IP/header, and duplicate event.",
++                        "High")
++
+     def _scan_logical_flow(self, php, xml, phtml):
+         """Analyse cross-module dependencies, duplicated business logic, reuse opportunities,
+         and end-to-end logical flows at the module level."""
